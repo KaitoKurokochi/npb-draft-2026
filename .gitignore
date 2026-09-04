@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+dist/
+build/
+
+# Data (large files — copy from NPB-scraper manually)
+data/rosters/*.csv
+data/past_drafts/*.csv
+data/candidates/*.csv
+
+# Keep directory structure
+!data/rosters/.gitkeep
+!data/past_drafts/.gitkeep
+!data/candidates/.gitkeep
+
+# Outputs (keep directory structure, ignore content)
+results/*
+!results/.gitkeep
+figures/*
+!figures/.gitkeep
+notebooks/.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
