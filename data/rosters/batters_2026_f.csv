@@ -1,0 +1,44 @@
+team_code,team_name_en,league,year,player_name,bats,G,PA,AB,R,H,2B,3B,HR,TB,RBI,SB,CS,SH,SF,BB,IBB,HBP,SO,GIDP,AVG,SLG,OBP,1B
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,淺間 大基,L,12,35,33,3,6,1,0,2,13,3,1,0,0,0,2,0,0,9,0,0.182,0.394,0.229,3
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,有原 航平,R,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,池田 隆英,R,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,五十幡 亮汰,L,34,33,30,4,6,0,0,0,6,1,5,2,2,0,1,0,0,9,0,0.2,0.2,0.226,6
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,伊藤 大海,L,9,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,上原 健太,L,15,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,大川 慈英,L,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,大塚 瑠晏,L,19,37,30,3,6,1,0,1,10,2,0,0,0,0,7,0,0,13,0,0.2,0.333,0.351,4
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,カストロ,R,26,93,80,10,17,1,0,5,33,10,2,0,0,1,10,0,2,23,1,0.213,0.413,0.312,11
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,加藤 貴之,L,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,上川畑 大悟,L,2,8,8,2,2,1,0,0,3,1,0,1,0,0,0,0,0,0,0,0.25,0.375,0.25,1
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,北山 亘基,R,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,清宮 幸太郎,L,45,189,160,26,38,3,1,8,67,26,2,1,0,1,23,1,5,37,1,0.238,0.419,0.349,26
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,古林 睿煬,R,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,郡司 裕也,R,44,167,146,15,35,2,0,3,46,11,0,0,0,1,18,0,2,26,3,0.24,0.315,0.329,30
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,齋藤 友貴哉,L,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,島本 浩也,L,16,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,清水 優心,R,14,26,22,2,3,1,0,1,7,4,0,0,1,0,3,0,0,5,0,0.136,0.318,0.24,1
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,進藤 勇也,R,9,23,20,2,3,1,0,1,7,3,0,0,0,0,3,0,0,7,1,0.15,0.35,0.261,1
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,達 孝太,R,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,田中 正義,R,13,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,玉井 大翔,R,11,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,田宮 裕涼,L,37,121,113,14,31,6,1,2,45,9,1,1,3,0,5,0,0,21,2,0.274,0.398,0.305,22
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,生田目 翼,R,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,奈良間 大己,R,34,91,82,13,21,2,1,2,31,11,3,0,1,0,6,0,2,25,1,0.256,0.378,0.322,16
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,西川 遥輝,L,18,55,43,7,8,1,1,1,14,4,1,0,0,0,10,0,2,13,0,0.186,0.326,0.364,5
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,野村 佑希,R,35,120,112,11,27,3,0,6,48,19,0,1,0,0,7,0,1,28,4,0.241,0.429,0.292,18
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,福島 蓮,R,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,福谷 浩司,R,9,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,細川 凌平,L,9,13,9,2,2,0,0,1,5,3,0,1,0,0,4,0,0,2,0,0.222,0.556,0.462,1
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,細野 晴希,L,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,堀 瑞輝,L,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,マルティネス,R,9,20,18,0,1,0,0,0,1,0,0,0,0,0,1,0,1,6,1,0.056,0.056,0.15,1
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,万波 中正,R,44,169,144,25,32,4,0,11,69,23,0,0,0,1,20,2,3,46,7,0.222,0.479,0.327,17
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,水谷 瞬,R,14,52,48,6,11,3,0,1,17,6,0,0,0,2,1,0,1,15,0,0.229,0.354,0.25,7
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,水野 達稀,L,41,156,140,18,40,10,2,1,57,13,3,0,4,2,7,0,3,25,1,0.286,0.407,0.329,27
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,矢澤 宏太,L,34,66,64,6,13,2,2,3,28,5,4,2,0,0,2,0,0,13,1,0.203,0.438,0.227,6
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,柳川 大晟,R,15,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,山縣 秀,R,9,20,18,2,0,0,0,0,0,1,0,0,2,0,0,0,0,2,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,山﨑 福也,L,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,山本 拓実,R,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0.0,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,吉田 賢吾,R,7,14,14,1,1,0,1,0,3,1,0,0,0,0,0,0,0,4,1,0.071,0.214,0.071,0
+f,Hokkaido Nippon-Ham Fighters,pacific,2026,レイエス,R,42,173,161,15,53,10,0,7,84,25,0,0,0,1,10,2,1,28,6,0.329,0.522,0.37,36
