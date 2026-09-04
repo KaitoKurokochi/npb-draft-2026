@@ -7,9 +7,10 @@ __pycache__/
 dist/
 build/
 
-# Data — track source inputs and templates, exclude large/generated outputs
-# Track: batters CSV (from NPB-scraper), position templates/manually filled files
-# Exclude: nothing in data/ by default (files are small enough to track)
+# Data files — do NOT push to git (generate locally from NPB-scraper or scripts)
+data/rosters/*.csv
+data/past_drafts/*.csv
+data/candidates/*.csv
 
 # Keep directory structure
 !data/rosters/.gitkeep
