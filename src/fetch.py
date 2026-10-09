@@ -1,32 +1,40 @@
 """
-Fetch the 支配下 roster of NPB teams from Yahoo!スポーツナビ.
+Fetch the 支配下 roster of NPB teams (names, ages, positions, 1軍 stats) in one run.
 
-Pages per team (https://baseball.yahoo.co.jp/npb/...):
-  teams/<yid>/players       -- roster (position section, number, name, player_id)
-  teams/<yid>/battingstats  -- this season's 1軍 batting (PA, OPS) for fielders
-  teams/<yid>/pitchingstats -- this season's 1軍 pitching (G, GS, SV, HLD, IP) for pitchers
-  player/<id>/top           -- pitchers only, for the throwing hand (右/左)
-  npb/transfer              -- 入退団情報 (once): players who left (自由契約/引退/退団) are removed
+Per team:
+  Yahoo!スポーツナビ (https://baseball.yahoo.co.jp/npb/...)
+    teams/<yid>/players       -- roster (position section, number, name, player_id)
+    teams/<yid>/battingstats  -- this season's 1軍 batting (PA, OPS) for fielders
+    teams/<yid>/pitchingstats -- this season's 1軍 pitching (G, GS, SV, HLD, IP) for pitchers
+    player/<id>/top           -- every player: birth date, 投打, draft, career
+  NPB.jp (https://npb.jp/bis/2026/stats/)
+    idf1_<code>.html / idf2_<code>.html -- 1軍 / ファーム fielding games per position
+Once per run:
+  Yahoo npb/transfer -- 入退団情報: players who left (自由契約/引退/退団) are removed
 
-Why not the player pages for stats: when a player has no 1軍 stats, the player page
-shows 2軍 stats instead, so team stats pages are used (1軍 only; "-" if none).
-
-Role (先発/中継ぎ/抑え/不明) is derived: GS/G >= 0.5 -> 先発, else SV >= SV_MIN_CLOSER -> 抑え,
-else 中継ぎ, G == 0 -> 不明. 育成 players (3-digit number such as 011) and coaches are excluded.
+Notes:
+  - Stats come from team pages, not player pages: a player page shows 2軍 stats when a player
+    has no 1軍 stats. Team pages are 1軍 only ("-" if none).
+  - role (投手): GS/G >= 0.5 -> 先発, else SV >= SV_MIN_CLOSER -> 抑え, else 中継ぎ, G == 0 -> 不明.
+  - position (野手): the position with the most games (1軍+2軍) among those allowed by the Yahoo
+    category (内野手 -> 一/二/三塁手・遊撃手). Without any record: "内野手(不明)".
+  - age: full age on AGE_REF_DATE (2027 opening day; provisional), computed from the birth date.
+  - 育成 players (3-digit number such as 011) and coaches are excluded.
 
 Usage:
-  python src/fetch.py          # all 12 teams
-  python src/fetch.py g t      # selected team codes only
+  python src/fetch.py                     # all 12 teams (~30 min)
+  python src/fetch.py g t                 # selected team codes only
   python src/fetch.py --departures-only   # re-apply 退団 removal to the existing files (no roster fetch)
 
 Output (under $NPB_DATA/npb-draft-2026/rosters/):
-  <code>_members.md  -- ## 投手 / ## 野手 tables (pitchers: throws/role/G/GS/SV/HLD/IP; fielders: position/PA/OPS)
+  <code>_members.md  -- ## 投手 / ## 野手 tables
 """
 
 import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import date
 from pathlib import Path
 
@@ -42,7 +50,9 @@ BATTING_URL = "https://baseball.yahoo.co.jp/npb/teams/{yid}/battingstats"
 TRANSFER_URL = "https://baseball.yahoo.co.jp/npb/transfer"
 PITCHING_URL = "https://baseball.yahoo.co.jp/npb/teams/{yid}/pitchingstats"
 PLAYER_URL = "https://baseball.yahoo.co.jp/npb/player/{pid}/top"
+NPB_FIELDING_URL = "https://npb.jp/bis/2026/stats/idf{n}_{code}.html"  # n=1: 1軍, n=2: ファーム
 SLEEP_SEC = 2.0
+AGE_REF_DATE = date(2027, 3, 26)  # 2027 opening day (provisional; update when the schedule is out)
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # code -> (yahoo team id, team name)
@@ -113,7 +123,7 @@ def _get(url, retries=3):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=30)
             resp.raise_for_status()
-            return BeautifulSoup(resp.text, "html.parser")
+            return BeautifulSoup(resp.content, "html.parser")  # bytes: let bs4 detect the charset (npb.jp omits it in headers)
         except requests.RequestException as e:
             if attempt == retries:
                 raise
@@ -133,14 +143,28 @@ def _stats_table(url):
     return out
 
 
-def fetch_throws(pid):
-    """Return '右' / '左' / '両' from the 投打 field of a player page ('' if unavailable)."""
-    soup = _get(PLAYER_URL.format(pid=pid))
-    for dt, dd in zip(soup.select(".bb-profile__title"), soup.select(".bb-profile__text")):
-        if dt.get_text(strip=True) == "投打":
-            m = re.match(r"([右左両])投", dd.get_text(strip=True))
-            return m.group(1) if m else ""
-    return ""
+def fetch_profile(pid):
+    """Return birth date, age on AGE_REF_DATE, throws/bats, draft, career from a player page."""
+    empty = {"birth": "", "age": "", "throws": "", "bats": "", "draft": "", "career": ""}
+    try:
+        soup = _get(PLAYER_URL.format(pid=pid))
+    except requests.RequestException as e:
+        print(f"  warning: profile fetch failed for {pid}: {e}")
+        return empty
+    prof = {dt.get_text(strip=True): dd.get_text(strip=True)
+            for dt, dd in zip(soup.select(".bb-profile__title"), soup.select(".bb-profile__text"))}
+    out = dict(empty)
+    m = re.match(r"(\d+)年(\d+)月(\d+)日", prof.get("生年月日（満年齢）", ""))
+    if m:
+        b = date(*map(int, m.groups()))
+        out["birth"] = b.isoformat()
+        out["age"] = AGE_REF_DATE.year - b.year - ((AGE_REF_DATE.month, AGE_REF_DATE.day) < (b.month, b.day))
+    m = re.match(r"([右左両])投([右左両])打", prof.get("投打", ""))
+    if m:
+        out["throws"], out["bats"] = m.groups()
+    out["draft"] = prof.get("ドラフト年（順位）", "")
+    out["career"] = prof.get("経歴", "")
+    return out
 
 
 def pitcher_stats(d):
@@ -157,45 +181,92 @@ def fielder_stats(d):
     return {"pa": pa, "ops": ops if ops != "-" else ""}
 
 
-def _fielder_table(rows):
-    lines = ["| player_id | number | name | position | PA | OPS |", "|---|---|---|---|---|---|"]
-    lines += [f"| {p['player_id']} | {p['number']} | {p['name']} | {p['section']} | {p['pa']} | {p['ops']} |"
-              for p in rows]
+# ---- fielding positions (NPB.jp) -------------------------------------------------------
+POSITIONS = ("捕手", "一塁手", "二塁手", "三塁手", "遊撃手", "外野手")
+ALLOWED = {"捕手": ("捕手",), "内野手": ("一塁手", "二塁手", "三塁手", "遊撃手"), "外野手": ("外野手",)}
+
+
+def norm_name(name):
+    """Normalize names across sites: NFKC, drop spaces, '*' marks and initials like 'T.'."""
+    n = unicodedata.normalize("NFKC", name)
+    n = re.sub(r"[\s*]", "", n)
+    return re.sub(r"^[A-Za-z]\.", "", n)
+
+
+def fetch_fielding_games(code):
+    """Return {normalized name: {position: games}} summed over 1軍 and ファーム."""
+    games = {}
+    for n in (1, 2):
+        soup = _get(NPB_FIELDING_URL.format(n=n, code=code))
+        for h5 in soup.find_all("h5"):
+            pos = h5.get_text(strip=True)
+            table = h5.find_next("table")
+            if pos not in POSITIONS or table is None:
+                continue
+            for tr in table.find_all("tr")[1:]:
+                c = [x.get_text(strip=True) for x in tr.find_all(["th", "td"])]
+                if len(c) >= 2 and c[1].isdigit():
+                    d = games.setdefault(norm_name(c[0]), {})
+                    d[pos] = d.get(pos, 0) + int(c[1])
+        time.sleep(SLEEP_SEC)
+    return games
+
+
+def fielder_position(category, g):
+    """Return (position label, 'pos games/pos games' string) from games per position."""
+    allowed = {k: v for k, v in g.items() if k in ALLOWED[category] and v > 0}
+    detail = "/".join(f"{k}{v}" for k, v in sorted(g.items(), key=lambda kv: -kv[1]) if v > 0)
+    if allowed:
+        return max(allowed, key=allowed.get), detail
+    return (f"{category}(不明)" if category == "内野手" else category), detail
+
+
+def _cell(x):
+    return str(x).replace("|", "/")
+
+
+def _md_table(cols, rows):
+    lines = ["| " + " | ".join(h for h, _ in cols) + " |", "|" + "---|" * len(cols)]
+    lines += ["| " + " | ".join(_cell(p.get(k, "")) for _, k in cols) + " |" for p in rows]
     return lines
 
 
-def _table(rows, with_throws=False):
-    if with_throws:
-        lines = ["| player_id | number | name | throws | role | G | GS | SV | HLD | IP |",
-                 "|---|---|---|---|---|---|---|---|---|---|"]
-        lines += [f"| {p['player_id']} | {p['number']} | {p['name']} | {p['throws']} | {p['role']} "
-                  f"| {p['g']} | {p['gs']} | {p['sv']} | {p['hld']} | {p['ip']} |" for p in rows]
-    else:
-        lines = ["| player_id | number | name |", "|---|---|---|"]
-        lines += [f"| {p['player_id']} | {p['number']} | {p['name']} |" for p in rows]
-    return lines
+PITCHER_COLS = [("player_id", "player_id"), ("number", "number"), ("name", "name"), ("birth", "birth"),
+                ("age", "age"), ("throws", "throws"), ("bats", "bats"), ("role", "role"), ("auto", "auto"), ("G", "g"),
+                ("GS", "gs"), ("SV", "sv"), ("HLD", "hld"), ("IP", "ip"), ("draft", "draft"),
+                ("career", "career")]
+FIELDER_COLS = [("player_id", "player_id"), ("number", "number"), ("name", "name"), ("birth", "birth"),
+                ("age", "age"), ("position", "position"), ("auto", "auto"), ("positions", "positions"), ("throws", "throws"),
+                ("bats", "bats"), ("PA", "pa"), ("OPS", "ops"), ("draft", "draft"), ("career", "career")]
 
 
-def to_markdown(players, team, yid):
+def to_markdown(players, team, yid, excluded=()):
     pitchers = [p for p in players if p["section"] == PITCHER]
     fielders = [p for p in players if p["section"] != PITCHER]
     lines = [
         f"# {team} 支配下選手一覧 (2026)",
         "",
         f"- 取得日: {date.today().isoformat()}",
-        f"- 取得元: {URL.format(yid=yid)}",
+        f"- 取得元: {URL.format(yid=yid)} ほか (Yahoo!スポーツナビ, NPB.jp 守備成績)",
         f"- 人数: {len(players)} (投手 {len(pitchers)} / 野手 {len(fielders)})",
+    ]
+    if excluded:
+        lines.append(f"{EXCLUDED_PREFIX} ({len(excluded)}名): " + ", ".join(excluded))
+    lines += [
+        f"- age: {AGE_REF_DATE.isoformat()} 時点の満年齢 (2027年開幕日は仮置き)",
         "- PA・OPS・G/GS/SV/HLD/IPは今季1軍の成績(球団別成績ページより。1軍出場なしは空欄/0)",
+        "- positions: 守備位置別の出場試合数(1軍+ファーム)。position はその最多(内野手/捕手/外野手の区分内)。記録なしの内野手は「内野手(不明)」",
+        "- auto: 自動判定した role / position。position・role を手で書き換えると、再取得しても引き継ぐ(auto と異なる値＝手動で書き換えた値)",
         "- 育成選手(背番号3桁)・監督コーチは除く",
         f"- role: 先発=GS/G>=0.5, 抑え=SV>={SV_MIN_CLOSER}(先発以外), 中継ぎ=その他, 不明=今季1軍登板なし",
         "",
         "## 投手",
         "",
-        *_table(pitchers, with_throws=True),
+        *_md_table(PITCHER_COLS, pitchers),
         "",
         "## 野手",
         "",
-        *_fielder_table(fielders),
+        *_md_table(FIELDER_COLS, fielders),
     ]
     return "\n".join(lines) + "\n"
 
@@ -255,41 +326,77 @@ def apply_departures(codes, departures):
         print(f"{code:>2} 退団により除外: {len(removed)}名")
 
 
+def load_manual_edits(path):
+    """Return {player_id: value} for rows whose role/position was edited by hand (value != auto)."""
+    if not path.exists():
+        return {}
+    out, cols = {}, None
+    for line in path.read_text(encoding="utf-8").split("\n"):
+        if line.startswith("## "):
+            cols = None
+        elif line.startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if cols is None:
+                cols = cells
+            elif not set(cells[0]) <= {"-"}:
+                d = dict(zip(cols, cells))
+                value = d.get("position") or d.get("role")
+                if d.get("auto") and value and value != d["auto"]:
+                    out[d["player_id"]] = value
+    return out
+
+
 def main(codes):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for i, code in enumerate(codes):
+    departures = fetch_departures()
+    for code in codes:
         yid, team = TEAMS[code]
+        time.sleep(SLEEP_SEC)
         resp = requests.get(URL.format(yid=yid), headers=HEADERS, timeout=30)
         resp.raise_for_status()
-        players = parse_players(resp.text)
+        listed = parse_players(resp.text)
+        departed = departures.get(code, {})
+        players = [p for p in listed if p["name"] not in departed]
+        excluded = [f"{p['name']}({departed[p['name']]})" for p in listed if p["name"] in departed]
         time.sleep(SLEEP_SEC)
         batting = _stats_table(BATTING_URL.format(yid=yid))
         time.sleep(SLEEP_SEC)
         pitching = _stats_table(PITCHING_URL.format(yid=yid))
+        time.sleep(SLEEP_SEC)
+        fielding = fetch_fielding_games(code)
         for p in players:
             key = (p["number"], p["name"])
             if p["section"] == PITCHER:
                 p.update(pitcher_stats(pitching.get(key, {})))
-                time.sleep(SLEEP_SEC)
-                p["throws"] = fetch_throws(p["player_id"])
-                if not p["throws"]:
-                    print(f"  warning: throws not found for {p['name']} ({p['player_id']})")
             else:
                 if key not in batting:
                     print(f"  warning: no row in battingstats for {p['name']} ({p['number']})")
                 p.update(fielder_stats(batting.get(key, {})))
-        path = OUT_DIR / f"{code}_members.md"
-        path.write_text(to_markdown(players, team, yid), encoding="utf-8")
-        print(f"{code:>2} {team}: {len(players)} players -> {path.name}")
-        if i < len(codes) - 1:
+                p["position"], p["positions"] = fielder_position(p["section"], fielding.get(norm_name(p["name"]), {}))
             time.sleep(SLEEP_SEC)
+            p.update(fetch_profile(p["player_id"]))
+            if not p["birth"]:
+                print(f"  warning: birth date not found for {p['name']} ({p['player_id']})")
+        manual = load_manual_edits(OUT_DIR / f"{code}_members.md")
+        for p in players:
+            field = "role" if p["section"] == PITCHER else "position"
+            p["auto"] = p[field]
+            if p["player_id"] in manual:
+                p[field] = manual[p["player_id"]]
+        if manual:
+            print(f"  carried over {sum(p['player_id'] in manual for p in players)} manual edits")
+        unknown = [p["name"] for p in players if p["section"] == "内野手" and p["position"] == "内野手(不明)"]
+        path = OUT_DIR / f"{code}_members.md"
+        path.write_text(to_markdown(players, team, yid, excluded), encoding="utf-8")
+        print(f"{code:>2} {team}: {len(players)} players (除外 {len(excluded)}) -> {path.name}; "
+              f"内野手(不明): {len(unknown)}")
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     only_departures = "--departures-only" in args
     codes = [a for a in args if not a.startswith("--")] or list(TEAMS)
-    if not only_departures:
+    if only_departures:
+        apply_departures(codes, fetch_departures())
+    else:
         main(codes)
-    time.sleep(SLEEP_SEC)
-    apply_departures(codes, fetch_departures())
