@@ -6,6 +6,7 @@ Pages per team (https://baseball.yahoo.co.jp/npb/...):
   teams/<yid>/battingstats  -- this season's 1軍 batting (PA, OPS) for fielders
   teams/<yid>/pitchingstats -- this season's 1軍 pitching (G, GS, SV, HLD, IP) for pitchers
   player/<id>/top           -- pitchers only, for the throwing hand (右/左)
+  npb/transfer              -- 入退団情報 (once): players who left (自由契約/引退/退団) are removed
 
 Why not the player pages for stats: when a player has no 1軍 stats, the player page
 shows 2軍 stats instead, so team stats pages are used (1軍 only; "-" if none).
@@ -16,6 +17,7 @@ else 中継ぎ, G == 0 -> 不明. 育成 players (3-digit number such as 011) an
 Usage:
   python src/fetch.py          # all 12 teams
   python src/fetch.py g t      # selected team codes only
+  python src/fetch.py --departures-only   # re-apply 退団 removal to the existing files (no roster fetch)
 
 Output (under $NPB_DATA/npb-draft-2026/rosters/):
   <code>_members.md  -- ## 投手 / ## 野手 tables (pitchers: throws/role/G/GS/SV/HLD/IP; fielders: position/PA/OPS)
@@ -37,6 +39,7 @@ OUT_DIR = (NPB_DATA / "npb-draft-2026" if "NPB_DATA" in os.environ else NPB_DATA
 
 URL = "https://baseball.yahoo.co.jp/npb/teams/{yid}/players"
 BATTING_URL = "https://baseball.yahoo.co.jp/npb/teams/{yid}/battingstats"
+TRANSFER_URL = "https://baseball.yahoo.co.jp/npb/transfer"
 PITCHING_URL = "https://baseball.yahoo.co.jp/npb/teams/{yid}/pitchingstats"
 PLAYER_URL = "https://baseball.yahoo.co.jp/npb/player/{pid}/top"
 SLEEP_SEC = 2.0
@@ -197,6 +200,61 @@ def to_markdown(players, team, yid):
     return "\n".join(lines) + "\n"
 
 
+YAHOO_TEAM_LABEL = {"g": "巨人", "t": "阪神", "db": "DeNA", "c": "広島", "d": "中日", "s": "ヤクルト",
+                    "h": "ソフトバンク", "l": "西武", "e": "楽天", "m": "ロッテ", "f": "日本ハム", "b": "オリックス"}
+EXCLUDED_PREFIX = "- 退団により除外"
+
+
+def fetch_departures():
+    """Return {team_code: {player_name: reason}} from the 入退団情報 page (状況 == 退団)."""
+    soup = _get(TRANSFER_URL)
+    out = {}
+    for code, label in YAHOO_TEAM_LABEL.items():
+        h = next((h for h in soup.find_all(["h2", "h3", "h4"]) if h.get_text(strip=True) == label), None)
+        table = h.find_next("table") if h else None
+        if table is None:
+            print(f"  warning: no 入退団情報 table for {label}")
+            continue
+        out[code] = {}
+        for tr in table.find_all("tr")[1:]:
+            c = [x.get_text(strip=True) for x in tr.find_all(["th", "td"])]
+            if len(c) >= 5 and c[1] == "退団":
+                out[code][c[2].replace("※", "")] = c[4]
+    return out
+
+
+def exclude_departed(md, departed):
+    """Remove rows of departed players from a team file text; update the counts and the 除外 line."""
+    kept, removed = [], []
+    for line in md.split("\n"):
+        m = re.match(r"\| \d+ \| \S+ \| (.+?) \|", line)
+        if m and m.group(1) in departed:
+            removed.append(f"{m.group(1)}({departed[m.group(1)]})")
+        else:
+            kept.append(line)
+    text = "\n".join(kept)
+    old = re.search(rf"^{EXCLUDED_PREFIX} \(\d+名\): (.*)$", text, re.M)
+    names = ([x for x in old.group(1).split(", ") if x] if old else []) + removed
+    if old:
+        text = text.replace(old.group(0) + "\n", "")
+    pit_part, _, fld_part = text.partition("## 野手")
+    n_p = len(re.findall(r"^\| \d+ \| ", pit_part, re.M))
+    n_f = len(re.findall(r"^\| \d+ \| ", fld_part, re.M))
+    text = re.sub(r"^- 人数: .*$", f"- 人数: {n_p + n_f} (投手 {n_p} / 野手 {n_f})", text, count=1, flags=re.M)
+    if names:
+        line = f"{EXCLUDED_PREFIX} ({len(names)}名): " + ", ".join(names)
+        text = re.sub(r"^(- 人数: .*)$", lambda m: m.group(1) + "\n" + line, text, count=1, flags=re.M)
+    return text, removed
+
+
+def apply_departures(codes, departures):
+    for code in codes:
+        path = OUT_DIR / f"{code}_members.md"
+        text, removed = exclude_departed(path.read_text(encoding="utf-8"), departures.get(code, {}))
+        path.write_text(text, encoding="utf-8")
+        print(f"{code:>2} 退団により除外: {len(removed)}名")
+
+
 def main(codes):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for i, code in enumerate(codes):
@@ -228,4 +286,10 @@ def main(codes):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:] or list(TEAMS))
+    args = sys.argv[1:]
+    only_departures = "--departures-only" in args
+    codes = [a for a in args if not a.startswith("--")] or list(TEAMS)
+    if not only_departures:
+        main(codes)
+    time.sleep(SLEEP_SEC)
+    apply_departures(codes, fetch_departures())
