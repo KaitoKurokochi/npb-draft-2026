@@ -6,7 +6,7 @@ NPB 2026年ドラフト会議の1位指名予想プロジェクト。
 
 ## アプローチ
 
-1. **ロースター分析** — 各球団のポジション別選手数・ランク（A/B/C/X）を整理し、穴を特定
+1. **ロースター分析** — 各球団の支配下選手をポジション別・年齢別・成績別（野手はOPS、投手は先発/中継ぎ/抑え）に整理し、穴を特定
 2. **ニーズ判定** — 即戦力（大卒・社会人）vs 育成（高卒・5年後基準）の優先度を決定
 3. **過去ドラフト傾向** — 過去5〜7年の1位指名パターンを球団別に分析
 4. **候補選手評価** — 2026年の上位候補をポジション・カテゴリ別にリスト化
@@ -16,25 +16,38 @@ NPB 2026年ドラフト会議の1位指名予想プロジェクト。
 
 ```
 npb-draft-2026/
-├── data/
-│   ├── rosters/       # 球団別ロースターCSV (NPB-scraperから)
-│   ├── past_drafts/   # 過去ドラフトデータ
-│   └── candidates/    # 2026年候補選手データ
 ├── src/
-│   ├── roster_analyzer.py    # ロースター分析・ランク付け
-│   ├── draft_history.py      # 過去傾向分析
-│   └── candidate_ranker.py   # 候補選手評価
+│   └── fetch.py       # 12球団の支配下選手一覧を取得 (Yahoo!スポーツナビ)
 ├── notebooks/         # 探索的分析・可視化
-├── results/           # 分析結果 (CSV/JSON)
-├── figures/           # 図表
+├── results/           # 分析結果 (git管理外)
+├── figures/           # 図表 (git管理外)
 └── README.md
 ```
 
+データは**リポジトリの外**（iCloud）に置く。環境変数 `NPB_DATA` で場所を指定する（`~/.claude/.agent_home` で設定）。
+
+```
+$NPB_DATA/npb-draft-2026/
+├── rosters/           # 球団別の支配下選手一覧 {team_code}_members.md
+├── candidates/        # 2026年候補選手データ
+└── past_drafts/       # 過去ドラフトデータ
+```
+
+## 使い方
+
+```bash
+pip install -r requirements.txt
+python src/fetch.py          # 12球団すべて
+python src/fetch.py g t      # 指定した球団コードのみ
+```
+
+出力は `$NPB_DATA/npb-draft-2026/rosters/{team_code}_members.md`。球団コード: g, t, db, c, d, s, h, l, e, m, f, b。
+
 ## データソース
 
-- **ロースターデータ**: `../NPB-scraper/data/csv/batters_2026_all.csv`（2026シーズン進行中）
+- **ロースターデータ**: Yahoo!スポーツナビ（球団ページの選手一覧・打撃成績・投手成績、投手の個人ページ）。**支配下選手のみ**を対象にする（育成まで見ると量が多すぎるため）。詳細は `$DOCS/baseball/npb_draft_2026.md`
 - **過去ドラフトデータ**: NPB公式 / Webスクレイピング or 手動入力
-- **候補選手データ**: ベースボールマガジン・各スポーツ紙・Baseball Lab等
+- **候補選手データ**: 球歴.com・ベースボールマガジン・各スポーツ紙等
 
 ## 予想対象
 
