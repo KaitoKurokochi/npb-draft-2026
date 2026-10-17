@@ -1,24 +1,25 @@
 """
 Build a browser-viewable roster chart (age x position) for each of the 12 teams.
 
-Reads : $NPB_DATA/npb-draft-2026/rosters/<code>_members.md   (written by fetch.py)
-Writes: $NPB_DATA/npb-draft-2026/roster_view.html
+Reads : $NPB_DATA/npb_scraper/npb.sqlite            (npb_scraper's database, read-only)
+        $NPB_DATA/npb-draft-2026/overrides.json     (manual position / role changes)
+        $NPB_DATA/npb-draft-2026/labels.json        (「まだ数年使える」 labels)
+Writes: $NPB_DATA/npb-draft-2026/roster_view.html   (and overrides.json / labels.json in --serve mode)
 
 Rows   : age on the 2027 opening day (~19, 20, ..., 34, 35~)
 Columns: 先発(右) / 先発(左) / 中継ぎ・抑え(右) / 中継ぎ・抑え(左) / 捕手 / 一塁手 / 二塁手 / 三塁手 / 遊撃手 / 外野手 (+ 内野手(不明) if any)
-Cells  : '<surname>#<number>' (hover for details); bright = regular (see thresholds above), dim = others. Pitchers sorted by IP, fielders by PA.
+Cells  : '<surname>#<number>' (hover for 2026 / 2025 stats); bright = regular (thresholds in derive.py), dim = others.
+         Pitchers sorted by innings, fielders by plate appearances (2026, 1軍).
 
 Moving players (planned future position):
-  Dragging a player in --serve mode rewrites that player's `position` (fielders) or `role`
-  (pitchers) in <code>_members.md directly. The `auto` column keeps the automatic judgement, so
-  a value that differs from `auto` is a manual edit (fetch.py carries such edits over).
-  A player can only be moved to another column of the same kind (pitchers: 先発/中継ぎ・抑え,
-  fielders: 捕手/一塁手/二塁手/三塁手/遊撃手/外野手) within the same age row.
+  Dragging a player in --serve mode stores a manual `position` (fielders) or `role` (pitchers) for that
+  player_id in overrides.json; moving back to the automatic value removes it. A player can only be moved to
+  another column of the same kind and throwing hand (pitchers: 先発/中継ぎ・抑え, fielders: 捕手/一塁手/二塁手/
+  三塁手/遊撃手/外野手) within the same age row.
 
 Labels (まだ数年使える):
-  Clicking a player name in --serve mode toggles a green "keep" label on that player. The labelled
-  player_ids are stored in labels.json next to roster_view.html (kept apart from <code>_members.md
-  so fetch.py never touches them); the static page shows the labels but cannot change them.
+  Clicking a player name in --serve mode toggles a green label, stored in labels.json. The static page shows
+  the labels but cannot change them.
 
 Usage:
   python3 src/build_view.py            # write a static roster_view.html (not editable)
@@ -28,29 +29,31 @@ Usage:
 import html
 import json
 import os
-import re
 import sys
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import derive  # noqa: E402
+import npb_db  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 NPB_DATA = Path(os.environ.get("NPB_DATA", ROOT / "data"))
 DATA_ROOT = NPB_DATA / "npb-draft-2026" if "NPB_DATA" in os.environ else NPB_DATA
-ROSTER_DIR = DATA_ROOT / "rosters"
 OUT_PATH = DATA_ROOT / "roster_view.html"
-LABELS_PATH = DATA_ROOT / "labels.json"   # {player_id: true} = 「まだ数年使える」ラベル
+LABELS_PATH = DATA_ROOT / "labels.json"        # [player_id, ...]
+OVERRIDES_PATH = DATA_ROOT / "overrides.json"  # {player_id: {"position": ...} | {"role": ...}}
 PORT = 8765
 
-# Binary "regular" flag -> bright text; everything else is dimmed.
-GS_MIN_STARTER = 20   # 先発: 先発数 (GS) at or above this
-G_MIN_RELIEVER = 40   # 中継ぎ・抑え: 登板数 (G) at or above this
-PA_MIN_FIELDER = 250  # 野手: 1軍の打席数 (PA) at or above this
-
-TEAM_ORDER = ["g", "t", "db", "c", "d", "s", "h", "l", "e", "m", "f", "b"]
+TEAMS = {  # code -> name, in display order
+    "g": "読売ジャイアンツ", "t": "阪神タイガース", "db": "横浜DeNAベイスターズ", "c": "広島東洋カープ",
+    "d": "中日ドラゴンズ", "s": "東京ヤクルトスワローズ", "h": "福岡ソフトバンクホークス", "l": "埼玉西武ライオンズ",
+    "e": "東北楽天ゴールデンイーグルス", "m": "千葉ロッテマリーンズ", "f": "北海道日本ハムファイターズ", "b": "オリックス・バファローズ",
+}
+TEAM_ORDER = list(TEAMS)
 AGE_ROWS = ["~19"] + [str(a) for a in range(20, 35)] + ["35~"]
 
-# column key -> label
 # (column key, label, throwing hand or None). Pitcher columns are split by throwing hand.
 COLUMNS = [
     ("先発", "先発(右)", "右"),
@@ -65,70 +68,73 @@ COLUMNS = [
     ("内野手(不明)", "内野手(不明)", None),
     ("外野手", "外野手", None),
 ]
+PIT_COLS = ("先発", "救援")
+FLD_COLS = ("捕手", "一塁手", "二塁手", "三塁手", "遊撃手", "外野手")
 
 
-def parse_members(path):
-    """Return (team name, header lines, players) from a team file written by fetch.py."""
-    text = path.read_text(encoding="utf-8")
-    m = re.match(r"# (.+?) 支配下選手一覧", text)
-    team = m.group(1) if m else path.stem
-    players, cols, kind = [], None, None
-    for line in text.split("\n"):
-        if line.startswith("## "):
-            kind = line[3:].strip()
-            cols = None
-        elif line.startswith("|") and kind in ("投手", "野手"):
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if cols is None:
-                cols = cells
-            elif not set(cells[0]) <= {"-"}:
-                players.append({"kind": kind, **dict(zip(cols, cells))})
-    return team, players
+def load_json(path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, data) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def to_view_player(raw: dict, override: dict) -> dict:
+    """Combine a database player with derived values and the manual override (if any)."""
+    kind = "投手" if raw["category"] == "投手" else "野手"
+    cur, prev = npb_db.SEASON, npb_db.PREV_SEASON
+    p = {"kind": kind, "player_id": raw["player_id"], "name": raw["name"], "number": raw["number"] or "",
+         "age": derive.age_on(raw["birth_date"]), "birth": raw["birth_date"] or "",
+         "throws": raw["throws"] or "", "bats": raw["bats"] or ""}
+    if kind == "投手":
+        now, before = (derive.pitching_line(raw["pitching"].get(y, [])) for y in (cur, prev))
+        p["auto"] = derive.pitcher_role(now)
+        p["role"] = override.get("role", p["auto"])
+        p["sort"] = (now or {}).get("outs") or 0
+        p["regular"] = derive.is_regular(kind, p["auto"], (now or {}).get("g"), (now or {}).get("gs"), None)
+        p["lines"] = [f"{cur}: {derive.pitching_text(now)}", f"{prev}: {derive.pitching_text(before)}"]
+    else:
+        now, before = (derive.batting_line(raw["batting"].get(y, [])) for y in (cur, prev))
+        games = {}
+        for r in raw["fielding"]:
+            games[r["position"]] = games.get(r["position"], 0) + (r["g"] or 0)
+        p["auto"], p["positions"] = derive.fielder_position(raw["category"], games)
+        p["position"] = override.get("position", p["auto"])
+        p["sort"] = (now or {}).get("pa") or 0
+        p["regular"] = derive.is_regular(kind, "", None, None, (now or {}).get("pa"))
+        p["lines"] = [f"{cur}: {derive.batting_text(now)}", f"{prev}: {derive.batting_text(before)}"]
+    return p
+
+
+def load_view_players(conn, code: str, overrides: dict) -> list[dict]:
+    return [to_view_player(raw, overrides.get(raw["player_id"], {})) for raw in npb_db.load_team(conn, code)]
 
 
 def column_of(p):
     if p["kind"] == "投手":
-        return "先発" if p.get("role") == "先発" else "救援"  # 中継ぎ / 抑え / 不明 -> 救援
-    return p.get("position", "")
+        return "先発" if p["role"] == "先発" else "救援"  # 中継ぎ / 抑え / 不明 -> 救援
+    return p["position"]
+
+
+def auto_column(p):
+    return ("先発" if p["auto"] == "先発" else "救援") if p["kind"] == "投手" else p["auto"]
 
 
 def hand_of(p):
     """Throwing hand used for the pitcher columns (anything but 左 counts as 右); None for fielders."""
-    return None if p["kind"] != "投手" else ("左" if p.get("throws") == "左" else "右")
-
-
-def age_row(p):
-    return age_label(p.get("age", ""))
+    return None if p["kind"] != "投手" else ("左" if p["throws"] == "左" else "右")
 
 
 def age_label(age):
-    if not age.isdigit():
+    if age is None:
         return "年齢不明"
-    a = int(age)
-    return "~19" if a <= 19 else "35~" if a >= 35 else str(a)
-
-
-def sort_key(p):
-    num = p.get("IP") if p["kind"] == "投手" else p.get("PA")
-    try:
-        return -float(num)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def num(x):
-    try:
-        return float(x)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def is_regular(p):
-    if p["kind"] == "野手":
-        return num(p.get("PA")) >= PA_MIN_FIELDER
-    if (p.get("auto") or p.get("role")) == "先発":
-        return num(p.get("GS")) >= GS_MIN_STARTER
-    return num(p.get("G")) >= G_MIN_RELIEVER
+    return "~19" if age <= 19 else "35~" if age >= 35 else str(age)
 
 
 def label(p):
@@ -137,89 +143,46 @@ def label(p):
 
 
 def tooltip(p):
-    parts = [f"#{p['number']}", p.get("birth", ""), f"{p.get('age', '?')}歳"]
+    head = [f"#{p['number']}", p["birth"], f"{p['age']}歳" if p["age"] is not None else "", f"{p['throws']}投{p['bats']}打"]
     if p["kind"] == "投手":
-        parts += [f"{p.get('throws', '')}投{p.get('bats', '')}打", f"role={p.get('role', '')}",
-                  f"G{p.get('G', '')}/GS{p.get('GS', '')}/SV{p.get('SV', '')}/HLD{p.get('HLD', '')}/IP{p.get('IP', '')}"]
+        head.append(f"role={p['role']}")
     else:
-        parts += [f"{p.get('throws', '')}投{p.get('bats', '')}打", p.get("positions", ""),
-                  f"PA{p.get('PA', '')} OPS{p.get('OPS', '')}" if p.get("PA") else "1軍打席なし"]
-    parts += [p.get("draft", "") or "ドラフト外", p.get("career", "")]
-    return " / ".join(x for x in parts if x)
-
-
-PIT_COLS = ("先発", "救援")
-FLD_COLS = ("捕手", "一塁手", "二塁手", "三塁手", "遊撃手", "外野手")
-
-
-def allowed_targets(kind):
-    return PIT_COLS if kind == "投手" else FLD_COLS
-
-
-def auto_column(p):
-    """Column of the automatic judgement (`auto`); falls back to the current value."""
-    if p["kind"] == "投手":
-        return "先発" if (p.get("auto") or p.get("role")) == "先発" else "救援"
-    return p.get("auto") or p.get("position", "")
-
-
-def load_labels():
-    try:
-        return set(json.loads(LABELS_PATH.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        return set()
+        head.append(p["positions"])
+    return " / ".join(x for x in head + p["lines"] if x)
 
 
 def set_label(pid, on):
     """Add / remove one player_id in labels.json; return (ok, message)."""
     if not pid:
         return False, "no player_id"
-    labels = load_labels()
+    labels = set(load_json(LABELS_PATH, []))
     labels.add(pid) if on else labels.discard(pid)
-    tmp = LABELS_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(sorted(labels), ensure_ascii=False), encoding="utf-8")
-    tmp.replace(LABELS_PATH)
+    save_json(LABELS_PATH, sorted(labels))
     return True, "ok"
 
 
 def apply_move(code, pid, to):
-    """Rewrite `position` / `role` of one player in <code>_members.md; return (ok, message)."""
-    if code not in TEAM_ORDER:
+    """Store (or clear) the manual position / role of one player in overrides.json; return (ok, message)."""
+    if code not in TEAMS:
         return False, "unknown team"
-    path = ROSTER_DIR / f"{code}_members.md"
-    lines = path.read_text(encoding="utf-8").split("\n")
-    kind, cols, done = None, None, False
-    for i, line in enumerate(lines):
-        if line.startswith("## "):
-            kind, cols = line[3:].strip(), None
-        elif line.startswith("|") and kind in ("投手", "野手"):
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if cols is None:
-                cols = cells
-                continue
-            d = dict(zip(cols, cells))
-            if d.get("player_id") != pid:
-                continue
-            if to not in allowed_targets(kind):
-                return False, f"{to} is not allowed for {kind}"
-            field = "role" if kind == "投手" else "position"
-            if "auto" not in cols:
-                return False, "no auto column: re-run fetch.py or the migration first"
-            auto = d["auto"]
-            if kind == "投手":
-                # moving back to the auto column restores `auto`; otherwise 先発 or 中継ぎ
-                new = auto if auto_column({"kind": kind, "auto": auto}) == to else ("先発" if to == "先発" else "中継ぎ")
-            else:
-                new = to
-            cells[cols.index(field)] = new
-            lines[i] = "| " + " | ".join(cells) + " |"
-            done = True
-            break
-    if not done:
+    with npb_db.connect() as conn:
+        p = next((x for x in load_view_players(conn, code, {}) if x["player_id"] == pid), None)
+    if p is None:
         return False, "unknown player"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text("\n".join(lines), encoding="utf-8")
-    tmp.replace(path)
+    if to not in (PIT_COLS if p["kind"] == "投手" else FLD_COLS):
+        return False, f"{to} is not allowed for {p['kind']}"
+    field = "role" if p["kind"] == "投手" else "position"
+    if p["kind"] == "投手":
+        # moving back to the auto column restores `auto`; otherwise 先発 or 中継ぎ
+        new = p["auto"] if auto_column(p) == to else ("先発" if to == "先発" else "中継ぎ")
+    else:
+        new = to
+    overrides = load_json(OVERRIDES_PATH, {})
+    if new == p["auto"]:
+        overrides.pop(pid, None)
+    else:
+        overrides[pid] = {field: new}
+    save_json(OVERRIDES_PATH, overrides)
     return True, "ok"
 
 
@@ -227,24 +190,22 @@ def player_div(code, p, editable, labels=frozenset()):
     orig, now = auto_column(p), column_of(p)
     moved = orig != now
     tip = tooltip(p) + (f" / 手動で移動: {orig} → {now}" if moved else "")
-    cls = f"p {'hi' if is_regular(p) else 'lo'}{' moved' if moved else ''}{' keep' if p.get('player_id') in labels else ''}"
+    cls = f"p {'hi' if p['regular'] else 'lo'}{' moved' if moved else ''}{' keep' if p['player_id'] in labels else ''}"
     drag = " draggable='true'" if editable else ""
-    return (f"<div class='{cls}'{drag} data-id='{html.escape(p.get('player_id', ''))}' data-kind='{p['kind']}' data-throws='{hand_of(p) or ''}' "
+    return (f"<div class='{cls}'{drag} data-id='{html.escape(p['player_id'])}' data-kind='{p['kind']}' data-throws='{hand_of(p) or ''}' "
             f"title='{html.escape(tip, quote=True)}'>{label(p)}</div>")
 
 
-def build_team(code, editable, labels=frozenset()):
-    path = ROSTER_DIR / f"{code}_members.md"
-    team, players = parse_members(path)
+def build_team(code, players, editable, labels=frozenset()):
     grid, counts = {}, {}
-    for p in sorted(players, key=sort_key):
-        row, col = age_row(p), (column_of(p), hand_of(p))
+    for p in sorted(players, key=lambda p: -p["sort"]):
+        row, col = age_label(p["age"]), (column_of(p), hand_of(p))
         grid.setdefault(row, {}).setdefault(col, []).append(p)
         counts[col] = counts.get(col, 0) + 1
     rows = AGE_ROWS + (["年齢不明"] if "年齢不明" in grid else [])
     cols = [(k, lab, h) for k, lab, h in COLUMNS if k != "内野手(不明)" or counts.get((k, h))]
 
-    out = [f"<h2>{html.escape(team)} <small>{len(players)}名</small></h2>", f"<div class=wrap><table data-code='{code}'>"]
+    out = [f"<h2>{html.escape(TEAMS[code])} <small>{len(players)}名</small></h2>", f"<div class=wrap><table data-code='{code}'>"]
     out.append("<thead><tr><th>年齢</th>" + "".join(
         f"<th>{html.escape(lab)}<span class=n>{counts.get((k, h), 0)}</span></th>" for k, lab, h in cols) + "<th>計</th></tr></thead><tbody>")
     for r in rows:
@@ -255,7 +216,7 @@ def build_team(code, editable, labels=frozenset()):
             cells.append(f"<td data-col='{k}' data-throws='{h or ''}'>" + "".join(player_div(code, p, editable, labels) for p in ps) + "</td>")
         out.append(f"<tr class='{'empty' if total == 0 else ''}'><th>{r}</th>{''.join(cells)}<td class=tot>{total or ''}</td></tr>")
     out.append("</tbody></table></div>")
-    return team, "\n".join(out)
+    return "\n".join(out)
 
 
 PAGE = """<!doctype html>
@@ -280,7 +241,7 @@ tr.empty th{color:var(--mute);font-weight:400}.tot{text-align:center;color:var(-
 .p{cursor:default}.p[draggable=true]{cursor:grab}td.ok{background:var(--accbg)}.p.dragging{opacity:.4}#msg{color:var(--acc);font-size:12px}.p.hi{color:var(--fg);font-weight:600}.p.lo{color:var(--mute)}.p.keep{color:var(--keep);font-weight:600}.p[draggable=true]:hover{text-decoration:underline}
 </style></head><body>
 <header><h1>NPB 2026 現状戦力</h1>
-<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルで詳細／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
+<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルで 2026・2025 の成績／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
 <nav id=tabs></nav>
 __SECTIONS__
 <script>
@@ -310,22 +271,21 @@ if(EDIT){
 
 def build_page(editable=False):
     names, sections = [], []
-    labels = load_labels()
-    for code in TEAM_ORDER:
-        if not (ROSTER_DIR / f"{code}_members.md").exists():
-            print(f"skip {code}: no file")
-            continue
-        team, body = build_team(code, editable, labels)
-        names.append(team)
-        sections.append(f"<section>{body}</section>")
+    labels = set(load_json(LABELS_PATH, []))
+    overrides = load_json(OVERRIDES_PATH, {})
+    with npb_db.connect() as conn:
+        for code in TEAM_ORDER:
+            players = load_view_players(conn, code, overrides)
+            names.append(TEAMS[code])
+            sections.append(f"<section>{build_team(code, players, editable, labels)}</section>")
     note = ("ドラッグで列を移動できます（同じ年齢の行の中だけ。投手=先発↔中継ぎ・抑え（右・左は固定）、野手=守備位置どうし）。"
-            "保存先: 各球団の _members.md（position / role を書き換え）" if editable else
+            "保存先: overrides.json（position / role）" if editable else
             "編集は <code>python3 src/build_view.py --serve</code>")
     return (PAGE.replace("__SECTIONS__", "\n".join(sections))
             .replace("__NAMES__", json.dumps(names, ensure_ascii=False))
             .replace("__DATE__", date.today().isoformat())
-            .replace("__GS__", str(GS_MIN_STARTER)).replace("__G__", str(G_MIN_RELIEVER))
-            .replace("__PA__", str(PA_MIN_FIELDER))
+            .replace("__GS__", str(derive.GS_MIN_STARTER)).replace("__G__", str(derive.G_MIN_RELIEVER))
+            .replace("__PA__", str(derive.PA_MIN_FIELDER))
             .replace("__EDITNOTE__", note).replace("__EDIT__", "true" if editable else "false")), len(names)
 
 

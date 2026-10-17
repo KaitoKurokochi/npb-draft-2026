@@ -17,8 +17,10 @@ NPB 2026年ドラフト会議の1位指名予想プロジェクト。
 ```
 npb-draft-2026/
 ├── src/
-│   ├── fetch.py       # 12球団の支配下選手一覧を取得 (Yahoo!スポーツナビ / NPB.jp)
-│   └── build_view.py  # 年齢×ポジションの戦力表 (HTML) を作成・編集
+│   ├── build_view.py  # 年齢×ポジションの戦力表 (HTML) を作成・編集
+│   ├── derive.py      # 年齢・役割・守備位置・レギュラー判定などの導出（純粋関数）
+│   ├── npb_db.py      # npb_scraper のデータベース (npb.sqlite) を読み取り専用で読む
+│   └── fetch.py       # （旧）Yahoo/NPB.jp から名簿を取得して rosters/*.md に書く。npb_scraper に置き換わり、現在は使わない
 ├── notebooks/         # 探索的分析・可視化
 ├── results/           # 分析結果 (git管理外)
 ├── figures/           # 図表 (git管理外)
@@ -28,9 +30,11 @@ npb-draft-2026/
 データは**リポジトリの外**（iCloud）に置く。環境変数 `NPB_DATA` で場所を指定する（`~/.claude/.agent_home` で設定）。
 
 ```
+$NPB_DATA/npb_scraper/npb.sqlite     # 選手・成績（npb_scraper が作る。このリポジトリは読むだけ）
 $NPB_DATA/npb-draft-2026/
-├── rosters/           # 球団別の支配下選手一覧 {team_code}_members.md
 ├── roster_view.html   # 戦力表（build_view.py の出力）
+├── overrides.json     # ドラッグで変えた守備位置・投手の役割 {player_id: {position|role}}
+├── labels.json        # 「まだ数年使える」ラベル [player_id]
 ├── candidates/        # 2026年候補選手データ
 └── past_drafts/       # 過去ドラフトデータ
 ```
@@ -41,15 +45,9 @@ $NPB_DATA/npb-draft-2026/
 pip install -r requirements.txt
 ```
 
-### 1. 選手一覧を取得する (`fetch.py`)
+### 1. データを用意する
 
-```bash
-python3 src/fetch.py          # 12球団すべて（30分前後。アクセス間隔2秒）
-python3 src/fetch.py g t      # 指定した球団コードのみ
-python3 src/fetch.py --departures-only   # 取得済みのファイルに、戦力外・引退などの退団者の除外だけ再反映する
-```
-
-出力は `$NPB_DATA/npb-draft-2026/rosters/{team_code}_members.md`。球団コード: g, t, db, c, d, s, h, l, e, m, f, b。手で書き換えた `position` / `role` は、取り直しても引き継がれる。
+選手・成績は `npb_scraper` リポジトリ（`$REPOS/npb_scraper`）が `$NPB_DATA/npb_scraper/npb.sqlite` に作る。取得・更新の方法はそちらの README を参照。
 
 ### 2. 戦力表を見る (`build_view.py`)
 
@@ -67,8 +65,8 @@ python3 src/build_view.py --serve     # 起動。Ctrl+C で停止
 open http://127.0.0.1:8765/
 ```
 
-- 選手を別の列にドラッグすると、その選手の `position`（投手は `role`）が `{team_code}_members.md` に直接書き込まれる。動かせるのは、同じ年齢の行の中で、同じ種類の列どうしだけ
-- 自動判定した元の値は `auto` の列に残る。元の列に戻すと `auto` の値に戻る
+- 選手を別の列にドラッグすると、その選手の `position`（投手は `role`）が `overrides.json` に保存される。動かせるのは、同じ年齢の行の中で、同じ種類の列どうしだけ
+- 自動判定の値は変わらず、元の列に戻すと上書きが消える
 - 選手名をクリックすると「まだ数年使える」ラベル（緑）の付け外し。`$NPB_DATA/npb-draft-2026/labels.json` に保存される
 - サーバーはこのPCの中（127.0.0.1）だけで動く。ページの再読み込みで最新の表になる
 
