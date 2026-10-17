@@ -5,7 +5,7 @@ Reads : $NPB_DATA/npb-draft-2026/rosters/<code>_members.md   (written by fetch.p
 Writes: $NPB_DATA/npb-draft-2026/roster_view.html
 
 Rows   : age on the 2027 opening day (~19, 20, ..., 34, 35~)
-Columns: 先発 / 中継ぎ・抑え / 捕手 / 一塁手 / 二塁手 / 三塁手 / 遊撃手 / 外野手 (+ 内野手(不明) if any)
+Columns: 先発(右) / 先発(左) / 中継ぎ・抑え(右) / 中継ぎ・抑え(左) / 捕手 / 一塁手 / 二塁手 / 三塁手 / 遊撃手 / 外野手 (+ 内野手(不明) if any)
 Cells  : '<surname>#<number>' (hover for details); bright = regular (see thresholds above), dim = others. Pitchers sorted by IP, fielders by PA.
 
 Moving players (planned future position):
@@ -15,9 +15,14 @@ Moving players (planned future position):
   A player can only be moved to another column of the same kind (pitchers: 先発/中継ぎ・抑え,
   fielders: 捕手/一塁手/二塁手/三塁手/遊撃手/外野手) within the same age row.
 
+Labels (まだ数年使える):
+  Clicking a player name in --serve mode toggles a green "keep" label on that player. The labelled
+  player_ids are stored in labels.json next to roster_view.html (kept apart from <code>_members.md
+  so fetch.py never touches them); the static page shows the labels but cannot change them.
+
 Usage:
-  python src/build_view.py            # write a static roster_view.html (not editable)
-  python src/build_view.py --serve    # editable page at http://127.0.0.1:8765 (drag to move players)
+  python3 src/build_view.py            # write a static roster_view.html (not editable)
+  python3 src/build_view.py --serve    # editable page at http://127.0.0.1:8765 (drag to move players)
 """
 
 import html
@@ -34,6 +39,7 @@ NPB_DATA = Path(os.environ.get("NPB_DATA", ROOT / "data"))
 DATA_ROOT = NPB_DATA / "npb-draft-2026" if "NPB_DATA" in os.environ else NPB_DATA
 ROSTER_DIR = DATA_ROOT / "rosters"
 OUT_PATH = DATA_ROOT / "roster_view.html"
+LABELS_PATH = DATA_ROOT / "labels.json"   # {player_id: true} = 「まだ数年使える」ラベル
 PORT = 8765
 
 # Binary "regular" flag -> bright text; everything else is dimmed.
@@ -45,16 +51,19 @@ TEAM_ORDER = ["g", "t", "db", "c", "d", "s", "h", "l", "e", "m", "f", "b"]
 AGE_ROWS = ["~19"] + [str(a) for a in range(20, 35)] + ["35~"]
 
 # column key -> label
+# (column key, label, throwing hand or None). Pitcher columns are split by throwing hand.
 COLUMNS = [
-    ("先発", "先発"),
-    ("救援", "中継ぎ・抑え"),
-    ("捕手", "捕手"),
-    ("一塁手", "一塁手"),
-    ("二塁手", "二塁手"),
-    ("三塁手", "三塁手"),
-    ("遊撃手", "遊撃手"),
-    ("内野手(不明)", "内野手(不明)"),
-    ("外野手", "外野手"),
+    ("先発", "先発(右)", "右"),
+    ("先発", "先発(左)", "左"),
+    ("救援", "中継ぎ・抑え(右)", "右"),
+    ("救援", "中継ぎ・抑え(左)", "左"),
+    ("捕手", "捕手", None),
+    ("一塁手", "一塁手", None),
+    ("二塁手", "二塁手", None),
+    ("三塁手", "三塁手", None),
+    ("遊撃手", "遊撃手", None),
+    ("内野手(不明)", "内野手(不明)", None),
+    ("外野手", "外野手", None),
 ]
 
 
@@ -81,6 +90,11 @@ def column_of(p):
     if p["kind"] == "投手":
         return "先発" if p.get("role") == "先発" else "救援"  # 中継ぎ / 抑え / 不明 -> 救援
     return p.get("position", "")
+
+
+def hand_of(p):
+    """Throwing hand used for the pitcher columns (anything but 左 counts as 右); None for fielders."""
+    return None if p["kind"] != "投手" else ("左" if p.get("throws") == "左" else "右")
 
 
 def age_row(p):
@@ -149,6 +163,25 @@ def auto_column(p):
     return p.get("auto") or p.get("position", "")
 
 
+def load_labels():
+    try:
+        return set(json.loads(LABELS_PATH.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return set()
+
+
+def set_label(pid, on):
+    """Add / remove one player_id in labels.json; return (ok, message)."""
+    if not pid:
+        return False, "no player_id"
+    labels = load_labels()
+    labels.add(pid) if on else labels.discard(pid)
+    tmp = LABELS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(sorted(labels), ensure_ascii=False), encoding="utf-8")
+    tmp.replace(LABELS_PATH)
+    return True, "ok"
+
+
 def apply_move(code, pid, to):
     """Rewrite `position` / `role` of one player in <code>_members.md; return (ok, message)."""
     if code not in TEAM_ORDER:
@@ -190,36 +223,36 @@ def apply_move(code, pid, to):
     return True, "ok"
 
 
-def player_div(code, p, editable):
+def player_div(code, p, editable, labels=frozenset()):
     orig, now = auto_column(p), column_of(p)
     moved = orig != now
     tip = tooltip(p) + (f" / 手動で移動: {orig} → {now}" if moved else "")
-    cls = f"p {'hi' if is_regular(p) else 'lo'}{' moved' if moved else ''}"
+    cls = f"p {'hi' if is_regular(p) else 'lo'}{' moved' if moved else ''}{' keep' if p.get('player_id') in labels else ''}"
     drag = " draggable='true'" if editable else ""
-    return (f"<div class='{cls}'{drag} data-id='{html.escape(p.get('player_id', ''))}' data-kind='{p['kind']}' "
+    return (f"<div class='{cls}'{drag} data-id='{html.escape(p.get('player_id', ''))}' data-kind='{p['kind']}' data-throws='{hand_of(p) or ''}' "
             f"title='{html.escape(tip, quote=True)}'>{label(p)}</div>")
 
 
-def build_team(code, editable):
+def build_team(code, editable, labels=frozenset()):
     path = ROSTER_DIR / f"{code}_members.md"
     team, players = parse_members(path)
     grid, counts = {}, {}
     for p in sorted(players, key=sort_key):
-        row, col = age_row(p), column_of(p)
+        row, col = age_row(p), (column_of(p), hand_of(p))
         grid.setdefault(row, {}).setdefault(col, []).append(p)
         counts[col] = counts.get(col, 0) + 1
     rows = AGE_ROWS + (["年齢不明"] if "年齢不明" in grid else [])
-    cols = [(k, lab) for k, lab in COLUMNS if k != "内野手(不明)" or counts.get(k)]
+    cols = [(k, lab, h) for k, lab, h in COLUMNS if k != "内野手(不明)" or counts.get((k, h))]
 
     out = [f"<h2>{html.escape(team)} <small>{len(players)}名</small></h2>", f"<div class=wrap><table data-code='{code}'>"]
     out.append("<thead><tr><th>年齢</th>" + "".join(
-        f"<th>{html.escape(lab)}<span class=n>{counts.get(k, 0)}</span></th>" for k, lab in cols) + "<th>計</th></tr></thead><tbody>")
+        f"<th>{html.escape(lab)}<span class=n>{counts.get((k, h), 0)}</span></th>" for k, lab, h in cols) + "<th>計</th></tr></thead><tbody>")
     for r in rows:
         cells, total = [], 0
-        for k, _ in cols:
-            ps = grid.get(r, {}).get(k, [])
+        for k, _, h in cols:
+            ps = grid.get(r, {}).get((k, h), [])
             total += len(ps)
-            cells.append(f"<td data-col='{k}'>" + "".join(player_div(code, p, editable) for p in ps) + "</td>")
+            cells.append(f"<td data-col='{k}' data-throws='{h or ''}'>" + "".join(player_div(code, p, editable, labels) for p in ps) + "</td>")
         out.append(f"<tr class='{'empty' if total == 0 else ''}'><th>{r}</th>{''.join(cells)}<td class=tot>{total or ''}</td></tr>")
     out.append("</tbody></table></div>")
     return team, "\n".join(out)
@@ -229,8 +262,8 @@ PAGE = """<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NPB 2026 現状戦力</title>
 <style>
-:root{--bg:#fff;--fg:#1c1f24;--mute:#6b7280;--line:#e2e5ea;--head:#f3f4f6;--acc:#1d4ed8;--accbg:#e8efff;--pit:var(--fg);--fld:#1c1f24}
-@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8ec;--mute:#9aa1ad;--line:#2d3139;--head:#1d2025;--acc:#8ab4ff;--accbg:#1f2a44;--pit:var(--fg);--fld:#e6e8ec}}
+:root{--bg:#fff;--fg:#1c1f24;--mute:#6b7280;--line:#e2e5ea;--head:#f3f4f6;--keep:#15803d;--acc:#1d4ed8;--accbg:#e8efff;--pit:var(--fg);--fld:#1c1f24}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8ec;--mute:#9aa1ad;--line:#2d3139;--head:#1d2025;--keep:#4ade80;--acc:#8ab4ff;--accbg:#1f2a44;--pit:var(--fg);--fld:#e6e8ec}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,"Hiragino Sans",sans-serif}
 header{padding:16px;border-bottom:1px solid var(--line)}h1{margin:0 0 4px;font-size:18px}
 p.note{margin:0;color:var(--mute);font-size:12px}
@@ -244,10 +277,10 @@ th,td{border:1px solid var(--line);padding:4px 8px;vertical-align:top;text-align
 thead th{background:var(--head);position:sticky;top:0}tbody th{background:var(--head);text-align:center}
 th .n{color:var(--mute);font-weight:400;margin-left:4px;font-size:12px}
 tr.empty th{color:var(--mute);font-weight:400}.tot{text-align:center;color:var(--mute)}
-.p{cursor:default}.p[draggable=true]{cursor:grab}td.ok{background:var(--accbg)}.p.dragging{opacity:.4}#msg{color:var(--acc);font-size:12px}.p.hi{color:var(--fg);font-weight:600}.p.lo{color:var(--mute)}
+.p{cursor:default}.p[draggable=true]{cursor:grab}td.ok{background:var(--accbg)}.p.dragging{opacity:.4}#msg{color:var(--acc);font-size:12px}.p.hi{color:var(--fg);font-weight:600}.p.lo{color:var(--mute)}.p.keep{color:var(--keep);font-weight:600}.p[draggable=true]:hover{text-decoration:underline}
 </style></head><body>
 <header><h1>NPB 2026 現状戦力</h1>
-<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルで詳細／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
+<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルで詳細／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
 <nav id=tabs></nav>
 __SECTIONS__
 <script>
@@ -259,8 +292,11 @@ const EDIT=__EDIT__;
 if(EDIT){
   const PIT=['先発','救援'],FLD=['捕手','一塁手','二塁手','三塁手','遊撃手','外野手'];
   let drag=null;
-  const ok=(td)=>drag&&td.dataset.col&&(drag.kind==='投手'?PIT:FLD).includes(td.dataset.col)&&td.parentElement===drag.tr;
-  document.addEventListener('dragstart',e=>{const d=e.target.closest('.p');if(!d)return;drag={id:d.dataset.id,kind:d.dataset.kind,tr:d.closest('tr'),code:d.closest('table').dataset.code,el:d};d.classList.add('dragging');e.dataTransfer.setData('text/plain',d.dataset.id)});
+  document.addEventListener('click',async e=>{const d=e.target.closest('.p');if(!d)return;const on=!d.classList.contains('keep');
+    const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:d.dataset.id,on})});
+    const j=await r.json();if(j.ok){d.classList.toggle('keep',on)}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
+  const ok=(td)=>drag&&td.dataset.col&&(drag.kind==='投手'?PIT:FLD).includes(td.dataset.col)&&td.parentElement===drag.tr&&td.dataset.throws===drag.throws;
+  document.addEventListener('dragstart',e=>{const d=e.target.closest('.p');if(!d)return;drag={id:d.dataset.id,kind:d.dataset.kind,throws:d.dataset.throws,tr:d.closest('tr'),code:d.closest('table').dataset.code,el:d};d.classList.add('dragging');e.dataTransfer.setData('text/plain',d.dataset.id)});
   document.addEventListener('dragend',()=>{if(drag)drag.el.classList.remove('dragging');drag=null;document.querySelectorAll('td.ok').forEach(t=>t.classList.remove('ok'))});
   document.addEventListener('dragover',e=>{const td=e.target.closest('td');if(td&&ok(td)){e.preventDefault();td.classList.add('ok')}});
   document.addEventListener('dragleave',e=>{const td=e.target.closest('td');if(td)td.classList.remove('ok')});
@@ -274,16 +310,17 @@ if(EDIT){
 
 def build_page(editable=False):
     names, sections = [], []
+    labels = load_labels()
     for code in TEAM_ORDER:
         if not (ROSTER_DIR / f"{code}_members.md").exists():
             print(f"skip {code}: no file")
             continue
-        team, body = build_team(code, editable)
+        team, body = build_team(code, editable, labels)
         names.append(team)
         sections.append(f"<section>{body}</section>")
-    note = ("ドラッグで列を移動できます（同じ年齢の行の中だけ。投手=先発↔中継ぎ・抑え、野手=守備位置どうし）。"
+    note = ("ドラッグで列を移動できます（同じ年齢の行の中だけ。投手=先発↔中継ぎ・抑え（右・左は固定）、野手=守備位置どうし）。"
             "保存先: 各球団の _members.md（position / role を書き換え）" if editable else
-            "編集は <code>python src/build_view.py --serve</code>")
+            "編集は <code>python3 src/build_view.py --serve</code>")
     return (PAGE.replace("__SECTIONS__", "\n".join(sections))
             .replace("__NAMES__", json.dumps(names, ensure_ascii=False))
             .replace("__DATE__", date.today().isoformat())
@@ -308,11 +345,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "not found", "text/plain")
 
     def do_POST(self):
-        if self.path != "/api/move":
+        if self.path not in ("/api/move", "/api/label"):
             return self._send(404, "not found", "text/plain")
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-            ok, msg = apply_move(body["code"], body["player_id"], body["to"])
+            if self.path == "/api/label":
+                ok, msg = set_label(body["player_id"], bool(body["on"]))
+            else:
+                ok, msg = apply_move(body["code"], body["player_id"], body["to"])
         except (ValueError, KeyError) as e:
             ok, msg = False, f"bad request: {e}"
         self._send(200 if ok else 400, json.dumps({"ok": ok, "message": msg}, ensure_ascii=False), "application/json")

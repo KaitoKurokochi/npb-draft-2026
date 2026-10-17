@@ -22,9 +22,9 @@ Notes:
   - 育成 players (3-digit number such as 011) and coaches are excluded.
 
 Usage:
-  python src/fetch.py                     # all 12 teams (~30 min)
-  python src/fetch.py g t                 # selected team codes only
-  python src/fetch.py --departures-only   # re-apply 退団 removal to the existing files (no roster fetch)
+  python3 src/fetch.py                     # all 12 teams (~30 min)
+  python3 src/fetch.py g t                 # selected team codes only
+  python3 src/fetch.py --departures-only   # re-apply 退団 removal to the existing files (no roster fetch)
 
 Output (under $NPB_DATA/npb-draft-2026/rosters/):
   <code>_members.md  -- ## 投手 / ## 野手 tables

@@ -44,9 +44,9 @@ pip install -r requirements.txt
 ### 1. 選手一覧を取得する (`fetch.py`)
 
 ```bash
-python src/fetch.py          # 12球団すべて（30分前後。アクセス間隔2秒）
-python src/fetch.py g t      # 指定した球団コードのみ
-python src/fetch.py --departures-only   # 取得済みのファイルに、戦力外・引退などの退団者の除外だけ再反映する
+python3 src/fetch.py          # 12球団すべて（30分前後。アクセス間隔2秒）
+python3 src/fetch.py g t      # 指定した球団コードのみ
+python3 src/fetch.py --departures-only   # 取得済みのファイルに、戦力外・引退などの退団者の除外だけ再反映する
 ```
 
 出力は `$NPB_DATA/npb-draft-2026/rosters/{team_code}_members.md`。球団コード: g, t, db, c, d, s, h, l, e, m, f, b。手で書き換えた `position` / `role` は、取り直しても引き継がれる。
@@ -54,7 +54,7 @@ python src/fetch.py --departures-only   # 取得済みのファイルに、戦�
 ### 2. 戦力表を見る (`build_view.py`)
 
 ```bash
-python src/build_view.py             # roster_view.html を書き出す（閲覧のみ）
+python3 src/build_view.py             # roster_view.html を書き出す（閲覧のみ）
 open "$NPB_DATA/npb-draft-2026/roster_view.html"
 ```
 
@@ -63,12 +63,13 @@ open "$NPB_DATA/npb-draft-2026/roster_view.html"
 ### 3. 選手のポジションを動かす（ドラッグ編集）
 
 ```bash
-python src/build_view.py --serve     # 起動。Ctrl+C で停止
+python3 src/build_view.py --serve     # 起動。Ctrl+C で停止
 open http://127.0.0.1:8765/
 ```
 
 - 選手を別の列にドラッグすると、その選手の `position`（投手は `role`）が `{team_code}_members.md` に直接書き込まれる。動かせるのは、同じ年齢の行の中で、同じ種類の列どうしだけ
 - 自動判定した元の値は `auto` の列に残る。元の列に戻すと `auto` の値に戻る
+- 選手名をクリックすると「まだ数年使える」ラベル（緑）の付け外し。`$NPB_DATA/npb-draft-2026/labels.json` に保存される
 - サーバーはこのPCの中（127.0.0.1）だけで動く。ページの再読み込みで最新の表になる
 
 ## データソース
