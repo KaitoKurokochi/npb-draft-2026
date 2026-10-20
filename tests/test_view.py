@@ -25,12 +25,14 @@ def test_set_leaving_adds_and_removes(tmp_path, monkeypatch):
     assert build_view.load_json(build_view.LEAVING_PATH, []) == ["b"]
 
 
-def test_set_need_toggles_per_team_and_rejects_unknowns(tmp_path, monkeypatch):
+def test_set_need_levels_per_team_and_rejects_unknowns(tmp_path, monkeypatch):
     monkeypatch.setattr(build_view, "NEEDS_PATH", tmp_path / "needs.json")
-    assert build_view.set_need("g", "捕手", True) == (True, "ok")
-    build_view.set_need("g", "先発(左)", True)
-    build_view.set_need("t", "捕手", True)
-    build_view.set_need("g", "捕手", False)
-    assert build_view.load_json(build_view.NEEDS_PATH, {}) == {"g": ["先発(左)"], "t": ["捕手"]}
-    assert build_view.set_need("zz", "捕手", True)[0] is False
-    assert build_view.set_need("g", "投手", True)[0] is False
+    assert build_view.set_need("g", "捕手", "future") == (True, "ok")
+    build_view.set_need("g", "先発(左)", "now")
+    build_view.set_need("t", "捕手", "future")
+    build_view.set_need("g", "捕手", "now")
+    build_view.set_need("g", "先発(左)", None)
+    assert build_view.load_json(build_view.NEEDS_PATH, {}) == {"g": {"捕手": "now"}, "t": {"捕手": "future"}}
+    assert build_view.set_need("zz", "捕手", "now")[0] is False
+    assert build_view.set_need("g", "投手", "now")[0] is False
+    assert build_view.set_need("g", "捕手", "soon")[0] is False
