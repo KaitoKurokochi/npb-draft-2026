@@ -35,6 +35,8 @@ $NPB_DATA/npb-draft-2026/
 ├── roster_view.html   # 戦力表（build_view.py の出力）
 ├── overrides.json     # ドラッグで変えた守備位置・投手の役割 {player_id: {position|role}}
 ├── labels.json        # 「まだ数年使える」ラベル [player_id]
+├── leaving.json       # 退団予定の選手 [player_id]
+├── needs.json         # 補強マーク {球団コード: {列名: future|now|none}}
 ├── candidates/        # 2026年候補選手データ
 └── past_drafts/       # 過去ドラフトデータ
 ```
@@ -72,7 +74,7 @@ open http://127.0.0.1:8765/
 
 ## データソース
 
-- **ロースターデータ**: Yahoo!スポーツナビ（球団ページの選手一覧・打撃成績・投手成績、投手の個人ページ）。**支配下選手のみ**を対象にする（育成まで見ると量が多すぎるため）。詳細は `$DOCS/agent/baseball/npb_draft_2026.md`
+- **ロースターデータ**: `npb_scraper` の `npb.sqlite`（元は Yahoo!スポーツナビ・NPB.jp）。**支配下選手のみ**を対象にする（育成まで見ると量が多すぎるため）。詳細は `$DOCS/baseball/npb_draft_2026.md`
 - **過去ドラフトデータ**: NPB公式 / Webスクレイピング or 手動入力
 - **候補選手データ**: 球歴.com・ベースボールマガジン・各スポーツ紙等
 
