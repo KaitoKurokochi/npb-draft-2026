@@ -46,7 +46,7 @@ LABELS_PATH = DATA_ROOT / "labels.json"        # [player_id, ...]
 OVERRIDES_PATH = DATA_ROOT / "overrides.json"  # {player_id: {"position": ...} | {"role": ...}}
 LEAVING_PATH = DATA_ROOT / "leaving.json"      # [player_id, ...] expected to leave the team
 NEEDS_PATH = DATA_ROOT / "needs.json"          # {team code: {column label: level}} positions that need reinforcement
-NEED_LEVELS = ("future", "now")                # yellow: needed in the future; red: needs an immediate contributor
+NEED_LEVELS = ("future", "now", "none")        # yellow: needed in the future; red: needs an immediate contributor; blue: no reinforcement needed
 PORT = 8765
 
 TEAMS = {  # code -> name, in display order
@@ -298,14 +298,15 @@ thead th{background:var(--head);position:sticky;top:0}tbody th{background:var(--
 th .n{color:var(--mute);font-weight:400;margin-left:4px;font-size:12px}
 tr.empty th{color:var(--mute);font-weight:400}.tot{text-align:center;color:var(--mute)}
 .p{cursor:default}.p[draggable=true]{cursor:grab}td.ok{background:var(--accbg)}.p.dragging{opacity:.4}#msg{color:var(--acc);font-size:12px}.p.hi{color:var(--fg);font-weight:600}.p.lo{color:var(--mute)}.p.keep{color:var(--keep);font-weight:600}.p[draggable=true]:hover{text-decoration:underline}
-:root{--future:#fde68a;--futurefg:#713f12;--now:#fca5a5;--nowfg:#7f1d1d}@media (prefers-color-scheme:dark){:root{--future:#5b4a0a;--futurefg:#fde68a;--now:#7f1d1d;--nowfg:#fecaca}}
+:root{--future:#fde68a;--futurefg:#713f12;--now:#fca5a5;--nowfg:#7f1d1d;--none:#bfdbfe;--nonefg:#1e3a8a}@media (prefers-color-scheme:dark){:root{--future:#5b4a0a;--futurefg:#fde68a;--now:#7f1d1d;--nowfg:#fecaca;--none:#1e3a8a;--nonefg:#bfdbfe}}
 thead th.need-future{background:var(--future);color:var(--futurefg)}td.need-future{background:color-mix(in srgb,var(--future) 35%,transparent)}
-thead th.need-now{background:var(--now);color:var(--nowfg)}td.need-now{background:color-mix(in srgb,var(--now) 35%,transparent)}th.col{cursor:default}
+thead th.need-now{background:var(--now);color:var(--nowfg)}td.need-now{background:color-mix(in srgb,var(--now) 35%,transparent)}
+thead th.need-none{background:var(--none);color:var(--nonefg)}td.need-none{background:color-mix(in srgb,var(--none) 35%,transparent)}th.col{cursor:default}
 #tip{position:fixed;display:none;z-index:10;max-width:420px;padding:8px 10px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px;pointer-events:none;white-space:normal}
 #tip .mute,#tip td.mute{color:var(--mute)}#tip table{margin-top:6px;min-width:0}#tip th,#tip td{padding:1px 6px;text-align:right;font-weight:400}#tip th{background:none;position:static}
 </style></head><body>
 <header><h1>NPB 2026 現状戦力</h1>
-<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルでポップアップ（ドラフト・経歴・2026/2025の成績）／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 列の見出しをクリックで 黄（将来的に補強が必要）→ 赤（即戦力の補強が必要）→ 解除／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
+<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルでポップアップ（ドラフト・経歴・2026/2025の成績）／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 列の見出しをクリックで 黄（将来的に補強が必要）→ 赤（即戦力の補強が必要）→ 青（補強不要）→ 解除／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
 <nav id=tabs></nav>
 <div id=tip></div>
 __SECTIONS__
@@ -323,12 +324,12 @@ document.addEventListener('dragstart',()=>{tip.style.display='none'});
 const EDIT=__EDIT__;
 if(EDIT){
   const PIT=['先発','救援'],FLD=['捕手','一塁手','二塁手','三塁手','遊撃手','外野手'];
-  const NEED=[null,'future','now'];
+  const NEED=[null,'future','now','none'];
   document.addEventListener('click',async e=>{const th=e.target.closest('th.col');if(!th)return;
     const cur=NEED.find(l=>l&&th.classList.contains('need-'+l))||null,next=NEED[(NEED.indexOf(cur)+1)%NEED.length];
     const t=th.closest('table'),i=th.cellIndex;
     const r=await fetch('/api/need',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:t.dataset.code,column:th.dataset.label,level:next})});
-    const j=await r.json();if(j.ok){[th,...[...t.querySelectorAll('tbody tr')].map(tr=>tr.cells[i])].forEach(c=>{c.classList.remove('need-future','need-now');if(next)c.classList.add('need-'+next)})}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
+    const j=await r.json();if(j.ok){[th,...[...t.querySelectorAll('tbody tr')].map(tr=>tr.cells[i])].forEach(c=>{c.classList.remove('need-future','need-now','need-none');if(next)c.classList.add('need-'+next)})}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
   let drag=null;
   document.addEventListener('click',async e=>{const d=e.target.closest('.p');if(!d)return;const on=!d.classList.contains('keep');
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:d.dataset.id,on})});
