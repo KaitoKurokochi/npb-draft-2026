@@ -19,8 +19,7 @@ npb-draft-2026/
 ├── src/
 │   ├── build_view.py  # 年齢×ポジションの戦力表 (HTML) を作成・編集
 │   ├── derive.py      # 年齢・役割・守備位置・レギュラー判定などの導出（純粋関数）
-│   ├── npb_db.py      # npb_scraper のデータベース (npb.sqlite) を読み取り専用で読む
-│   └── fetch.py       # （旧）Yahoo/NPB.jp から名簿を取得して rosters/*.md に書く。npb_scraper に置き換わり、現在は使わない
+│   └── npb_db.py      # npb_scraper のデータベース (npb.sqlite) を読み取り専用で読む
 ├── notebooks/         # 探索的分析・可視化
 ├── results/           # 分析結果 (git管理外)
 ├── figures/           # 図表 (git管理外)
