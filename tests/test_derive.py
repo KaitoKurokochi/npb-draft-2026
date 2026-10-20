@@ -29,11 +29,13 @@ def test_pitcher_role():
     assert derive.pitcher_role(None) == "不明"
 
 
-def test_fielder_position_stays_within_category():
+def test_fielder_position_follows_records_not_registration():
     pos, text = derive.fielder_position("内野手", {"外野手": 55, "一塁手": 40, "三塁手": 1})
-    assert pos == "一塁手" and text == "外野手55/一塁手40/三塁手1"
+    assert pos == "外野手" and text == "外野手55/一塁手40/三塁手1"
+    assert derive.fielder_position("外野手", {"遊撃手": 30, "外野手": 5})[0] == "遊撃手"
     assert derive.fielder_position("内野手", {})[0] == "内野手(不明)"
     assert derive.fielder_position("外野手", {})[0] == "外野手"
+    assert derive.fielder_position("捕手", {})[0] == "捕手"
 
 
 def test_regular_flag_uses_auto_role():

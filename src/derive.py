@@ -11,11 +11,6 @@ G_MIN_RELIEVER = 40   # 中継ぎ・抑え: appearances at or above this
 PA_MIN_FIELDER = 250  # 野手: 1軍 plate appearances at or above this
 SV_MIN_CLOSER = 5     # saves needed to be labelled 抑え (non-starters)
 
-ALLOWED_POSITIONS = {
-    "捕手": ("捕手",),
-    "内野手": ("一塁手", "二塁手", "三塁手", "遊撃手"),
-    "外野手": ("外野手",),
-}
 FIELDER_POSITIONS = ("捕手", "一塁手", "二塁手", "三塁手", "遊撃手", "外野手")
 
 
@@ -70,17 +65,15 @@ def pitcher_role(line) -> str:
 
 
 def fielder_position(category: str, games_by_position: dict[str, int]) -> tuple[str, str]:
-    """(position, 'positions' text). The position is the most-played one within the player's broad
-    category; an infielder with no fielding record is 内野手(不明)."""
-    allowed = ALLOWED_POSITIONS.get(category, ())
-    played = [(p, games_by_position.get(p, 0)) for p in allowed if games_by_position.get(p, 0) > 0]
+    """(position, 'positions' text). The position is the most-played one across all fielding records,
+    whatever the registered category. Without any record it falls back to the category (内野手 -> 内野手(不明))."""
+    played = sorted(((p, g) for p, g in games_by_position.items() if p in FIELDER_POSITIONS and g > 0),
+                    key=lambda pg: -pg[1])
     if played:
-        best = max(played, key=lambda pg: pg[1])[0]
+        best = played[0][0]
     else:
         best = category if category in ("捕手", "外野手") else "内野手(不明)"
-    all_played = sorted(((p, g) for p, g in games_by_position.items() if p in FIELDER_POSITIONS and g > 0),
-                        key=lambda pg: -pg[1])
-    return best, "/".join(f"{p}{g}" for p, g in all_played)
+    return best, "/".join(f"{p}{g}" for p, g in played)
 
 
 def is_regular(kind: str, auto_role: str, g, gs, pa) -> bool:
