@@ -45,6 +45,7 @@ OUT_PATH = DATA_ROOT / "roster_view.html"
 LABELS_PATH = DATA_ROOT / "labels.json"        # [player_id, ...]
 OVERRIDES_PATH = DATA_ROOT / "overrides.json"  # {player_id: {"position": ...} | {"role": ...}}
 LEAVING_PATH = DATA_ROOT / "leaving.json"      # [player_id, ...] expected to leave the team
+NEEDS_PATH = DATA_ROOT / "needs.json"          # {team code: [column label, ...]} positions that need reinforcement
 PORT = 8765
 
 TEAMS = {  # code -> name, in display order
@@ -183,6 +184,18 @@ def set_label(pid, on):
     return True, "ok"
 
 
+def set_need(code, column, on):
+    """Mark / unmark one column label of one team as needing reinforcement in needs.json; return (ok, message)."""
+    if code not in TEAMS or column not in {lab for _, lab, _ in COLUMNS}:
+        return False, "unknown team or column"
+    needs = load_json(NEEDS_PATH, {})
+    marked = set(needs.get(code, []))
+    marked.add(column) if on else marked.discard(column)
+    needs[code] = sorted(marked)
+    save_json(NEEDS_PATH, needs)
+    return True, "ok"
+
+
 def set_leaving(pid, on):
     """Add / remove one player_id in leaving.json; return (ok, message)."""
     if not pid:
@@ -232,7 +245,7 @@ def player_div(code, p, editable, labels=frozenset()):
             f"data-tip='{html.escape(tip, quote=True)}'>{label(p)}</div>")
 
 
-def build_team(code, players, editable, labels=frozenset()):
+def build_team(code, players, editable, labels=frozenset(), needs=frozenset()):
     grid, counts = {}, {}
     for p in sorted(players, key=lambda p: -p["sort"]):
         row, col = age_label(p["age"]), (column_of(p), column_hand(p))
@@ -243,13 +256,13 @@ def build_team(code, players, editable, labels=frozenset()):
 
     out = [f"<h2>{html.escape(TEAMS[code])} <small>{len(players)}名</small></h2>", f"<div class=wrap><table data-code='{code}'>"]
     out.append("<thead><tr><th>年齢</th>" + "".join(
-        f"<th>{html.escape(lab)}<span class=n>{counts.get((k, h), 0)}</span></th>" for k, lab, h in cols) + "<th>計</th></tr></thead><tbody>")
+        f"<th class='col{' need' if lab in needs else ''}' data-label='{html.escape(lab)}'>{html.escape(lab)}<span class=n>{counts.get((k, h), 0)}</span></th>" for k, lab, h in cols) + "<th>計</th></tr></thead><tbody>")
     for r in rows:
         cells, total = [], 0
-        for k, _, h in cols:
+        for k, lab, h in cols:
             ps = grid.get(r, {}).get((k, h), [])
             total += len(ps)
-            cells.append(f"<td data-col='{k}' data-throws='{h or ''}'>" + "".join(player_div(code, p, editable, labels) for p in ps) + "</td>")
+            cells.append(f"<td data-col='{k}' data-throws='{h or ''}'{' class=need' if lab in needs else ''}>" + "".join(player_div(code, p, editable, labels) for p in ps) + "</td>")
         out.append(f"<tr class='{'empty' if total == 0 else ''}'><th>{r}</th>{''.join(cells)}<td class=tot>{total or ''}</td></tr>")
     out.append("</tbody></table></div>")
     return "\n".join(out)
@@ -275,11 +288,13 @@ thead th{background:var(--head);position:sticky;top:0}tbody th{background:var(--
 th .n{color:var(--mute);font-weight:400;margin-left:4px;font-size:12px}
 tr.empty th{color:var(--mute);font-weight:400}.tot{text-align:center;color:var(--mute)}
 .p{cursor:default}.p[draggable=true]{cursor:grab}td.ok{background:var(--accbg)}.p.dragging{opacity:.4}#msg{color:var(--acc);font-size:12px}.p.hi{color:var(--fg);font-weight:600}.p.lo{color:var(--mute)}.p.keep{color:var(--keep);font-weight:600}.p[draggable=true]:hover{text-decoration:underline}
+:root{--need:#fde68a;--needfg:#713f12}@media (prefers-color-scheme:dark){:root{--need:#5b4a0a;--needfg:#fde68a}}
+thead th.need{background:var(--need);color:var(--needfg)}td.need{background:color-mix(in srgb,var(--need) 35%,transparent)}th.col{cursor:default}
 #tip{position:fixed;display:none;z-index:10;max-width:420px;padding:8px 10px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px;pointer-events:none;white-space:normal}
 #tip .mute,#tip td.mute{color:var(--mute)}#tip table{margin-top:6px;min-width:0}#tip th,#tip td{padding:1px 6px;text-align:right;font-weight:400}#tip th{background:none;position:static}
 </style></head><body>
 <header><h1>NPB 2026 現状戦力</h1>
-<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルでポップアップ（ドラフト・経歴・2026/2025の成績）／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
+<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルでポップアップ（ドラフト・経歴・2026/2025の成績）／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 黄 = 補強が必要なポジション（列の見出しクリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
 <nav id=tabs></nav>
 <div id=tip></div>
 __SECTIONS__
@@ -298,6 +313,10 @@ const EDIT=__EDIT__;
 if(EDIT){
   const PIT=['先発','救援'],FLD=['捕手','一塁手','二塁手','三塁手','遊撃手','外野手'];
   let drag=null;
+  document.addEventListener('click',async e=>{const th=e.target.closest('th.col');if(!th)return;const on=!th.classList.contains('need');
+    const t=th.closest('table'),i=th.cellIndex;
+    const r=await fetch('/api/need',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:t.dataset.code,column:th.dataset.label,on})});
+    const j=await r.json();if(j.ok){th.classList.toggle('need',on);t.querySelectorAll('tbody tr').forEach(tr=>tr.cells[i].classList.toggle('need',on))}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
   document.addEventListener('click',async e=>{const d=e.target.closest('.p');if(!d)return;const on=!d.classList.contains('keep');
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:d.dataset.id,on})});
     const j=await r.json();if(j.ok){d.classList.toggle('keep',on)}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
@@ -319,11 +338,12 @@ def build_page(editable=False):
     labels = set(load_json(LABELS_PATH, []))
     overrides = load_json(OVERRIDES_PATH, {})
     leaving = set(load_json(LEAVING_PATH, []))
+    all_needs = load_json(NEEDS_PATH, {})
     with npb_db.connect() as conn:
         for code in TEAM_ORDER:
             players = load_view_players(conn, code, overrides, leaving)
             names.append(TEAMS[code])
-            sections.append(f"<section>{build_team(code, players, editable, labels)}</section>")
+            sections.append(f"<section>{build_team(code, players, editable, labels, frozenset(all_needs.get(code, [])))}</section>")
     note = ("ドラッグで列を移動できます（同じ年齢の行の中だけ。投手=先発↔中継ぎ・抑え（右・左は固定）、野手=守備位置どうし）。"
             "退団予定の列へも動かせます（保存先: leaving.json）。保存先: overrides.json（position / role）" if editable else
             "編集は <code>python3 src/build_view.py --serve</code>")
@@ -351,12 +371,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "not found", "text/plain")
 
     def do_POST(self):
-        if self.path not in ("/api/move", "/api/label"):
+        if self.path not in ("/api/move", "/api/label", "/api/need"):
             return self._send(404, "not found", "text/plain")
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             if self.path == "/api/label":
                 ok, msg = set_label(body["player_id"], bool(body["on"]))
+            elif self.path == "/api/need":
+                ok, msg = set_need(body["code"], body["column"], bool(body["on"]))
             else:
                 ok, msg = apply_move(body["code"], body["player_id"], body["to"])
         except (ValueError, KeyError) as e:
