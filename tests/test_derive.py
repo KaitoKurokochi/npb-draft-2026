@@ -41,3 +41,17 @@ def test_regular_flag_uses_auto_role():
     assert not derive.is_regular("投手", "先発", 25, 19, None)
     assert derive.is_regular("投手", "中継ぎ", 40, 0, None)
     assert derive.is_regular("野手", "", None, None, 250)
+
+
+def test_stat_cells_match_headers():
+    pit = {"g": 40, "gs": 0, "w": 3, "l": 2, "sv": 1, "hold": 20, "outs": 160, "era": 2.5}
+    assert len(derive.pitching_cells(pit)) == len(derive.PITCHING_HEADERS)
+    assert derive.pitching_cells(pit)[-2:] == ["53.1", "2.50"]
+    bat = {"g": 100, "pa": 400, "avg": 0.2851, "hr": 12, "rbi": 40, "sb": 5, "ops": 0.7}
+    assert len(derive.batting_cells(bat)) == len(derive.BATTING_HEADERS)
+    assert derive.batting_cells(bat)[2] == ".285" and derive.batting_cells(bat)[-1] == ".700"
+
+
+def test_no_appearance_has_no_cells():
+    assert derive.pitching_cells(None) is None
+    assert derive.batting_cells({"pa": 0}) is None

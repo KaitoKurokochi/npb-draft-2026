@@ -1,5 +1,5 @@
 """Values derived from npb_scraper's database (npb.sqlite): age, pitcher role, fielding position,
-the regular flag and display lines. Pure functions — no I/O."""
+the regular flag and stat-table cells. Pure functions — no I/O."""
 
 from datetime import date
 
@@ -91,18 +91,30 @@ def is_regular(kind: str, auto_role: str, g, gs, pa) -> bool:
     return (g or 0) >= G_MIN_RELIEVER
 
 
-def pitching_text(line) -> str:
+PITCHING_HEADERS = ("登板", "先発", "勝", "敗", "S", "H", "回", "防御率")
+BATTING_HEADERS = ("試合", "打席", "打率", "本", "点", "盗", "OPS")
+
+
+def _rate(x, digits: int) -> str:
+    return "-" if x is None else f"{x:.{digits}f}"
+
+
+def _batting_rate(x) -> str:
+    return "-" if x is None else f".{round(x * 1000):03d}"
+
+
+def pitching_cells(line):
+    """Cells matching PITCHING_HEADERS; None when there was no 1軍 appearance."""
     if line is None:
-        return "1軍登板なし"
-    era = f"防{line['era']:.2f}" if line["era"] is not None else "防-"
+        return None
     gs = "-" if line["gs"] is None else line["gs"]
-    return (f"{line['g']}登板 先発{gs} {line['w'] or 0}勝{line['l'] or 0}敗 S{line['sv'] or 0} H{line['hold'] or 0} "
-            f"{innings(line['outs'] or 0)}回 {era}")
+    return [line["g"], gs, line["w"] or 0, line["l"] or 0, line["sv"] or 0, line["hold"] or 0,
+            innings(line["outs"] or 0), _rate(line["era"], 2)]
 
 
-def batting_text(line) -> str:
+def batting_cells(line):
+    """Cells matching BATTING_HEADERS; None when there was no 1軍 plate appearance."""
     if line is None or not line["pa"]:
-        return "1軍打席なし"
-    avg = f".{round(line['avg'] * 1000):03d}" if line["avg"] is not None else "-"
-    ops = f".{round(line['ops'] * 1000):03d}" if line["ops"] is not None else "-"
-    return f"{line['g']}試合 {line['pa']}打席 打率{avg} {line['hr']}本 {line['rbi']}点 {line['sb']}盗 OPS{ops}"
+        return None
+    return [line["g"], line["pa"], _batting_rate(line["avg"]), line["hr"], line["rbi"], line["sb"],
+            _batting_rate(line["ops"])]

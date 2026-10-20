@@ -25,7 +25,7 @@ def load_team(conn, team: str) -> list[dict]:
     """Active 支配下 players of a team for SEASON (no 育成, no 退団), each with raw stat rows:
     'pitching' / 'batting': {year: [rows]} (1軍), 'fielding': [rows] of SEASON (1軍 and ファーム)."""
     players = [dict(r) for r in conn.execute(
-        """SELECT p.player_id, p.name, p.birth_date, p.throws, p.bats, p.category, r.number
+        """SELECT p.player_id, p.name, p.birth_date, p.throws, p.bats, p.category, p.draft, p.career, r.number
            FROM roster r JOIN players p USING (player_id)
            WHERE r.year = ? AND r.team = ? AND r.is_development = 0 AND r.departure IS NULL""", (SEASON, team))]
     by_id = {p["player_id"]: p for p in players}

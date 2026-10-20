@@ -8,7 +8,7 @@ Writes: $NPB_DATA/npb-draft-2026/roster_view.html   (and overrides.json / labels
 
 Rows   : age on the 2027 opening day (~19, 20, ..., 34, 35~)
 Columns: 先発(右) / 先発(左) / 中継ぎ・抑え(右) / 中継ぎ・抑え(左) / 捕手 / 一塁手 / 二塁手 / 三塁手 / 遊撃手 / 外野手 (+ 内野手(不明) if any)
-Cells  : '<surname>#<number>' (hover for 2026 / 2025 stats); bright = regular (thresholds in derive.py), dim = others.
+Cells  : '<surname>#<number>' (hover for a popup: draft, career, 2026 / 2025 stats); bright = regular (thresholds in derive.py), dim = others.
          Pitchers sorted by innings, fielders by plate appearances (2026, 1軍).
 
 Moving players (planned future position):
@@ -44,6 +44,7 @@ DATA_ROOT = NPB_DATA / "npb-draft-2026" if "NPB_DATA" in os.environ else NPB_DAT
 OUT_PATH = DATA_ROOT / "roster_view.html"
 LABELS_PATH = DATA_ROOT / "labels.json"        # [player_id, ...]
 OVERRIDES_PATH = DATA_ROOT / "overrides.json"  # {player_id: {"position": ...} | {"role": ...}}
+LEAVING_PATH = DATA_ROOT / "leaving.json"      # [player_id, ...] expected to leave the team
 PORT = 8765
 
 TEAMS = {  # code -> name, in display order
@@ -53,6 +54,8 @@ TEAMS = {  # code -> name, in display order
 }
 TEAM_ORDER = list(TEAMS)
 AGE_ROWS = ["~19"] + [str(a) for a in range(20, 35)] + ["35~"]
+
+LEAVING = "退団予定"  # column key; holds players of any kind, so it has no throwing hand
 
 # (column key, label, throwing hand or None). Pitcher columns are split by throwing hand.
 COLUMNS = [
@@ -67,6 +70,7 @@ COLUMNS = [
     ("遊撃手", "遊撃手", None),
     ("内野手(不明)", "内野手(不明)", None),
     ("外野手", "外野手", None),
+    (LEAVING, "退団予定", None),
 ]
 PIT_COLS = ("先発", "救援")
 FLD_COLS = ("捕手", "一塁手", "二塁手", "三塁手", "遊撃手", "外野手")
@@ -85,20 +89,22 @@ def save_json(path, data) -> None:
     tmp.replace(path)
 
 
-def to_view_player(raw: dict, override: dict) -> dict:
+def to_view_player(raw: dict, override: dict, leaving: bool = False) -> dict:
     """Combine a database player with derived values and the manual override (if any)."""
     kind = "投手" if raw["category"] == "投手" else "野手"
     cur, prev = npb_db.SEASON, npb_db.PREV_SEASON
     p = {"kind": kind, "player_id": raw["player_id"], "name": raw["name"], "number": raw["number"] or "",
          "age": derive.age_on(raw["birth_date"]), "birth": raw["birth_date"] or "",
-         "throws": raw["throws"] or "", "bats": raw["bats"] or ""}
+         "throws": raw["throws"] or "", "bats": raw["bats"] or "",
+         "draft": raw["draft"] or "", "career": raw["career"] or "", "leaving": leaving}
     if kind == "投手":
         now, before = (derive.pitching_line(raw["pitching"].get(y, [])) for y in (cur, prev))
         p["auto"] = derive.pitcher_role(now)
         p["role"] = override.get("role", p["auto"])
         p["sort"] = (now or {}).get("outs") or 0
         p["regular"] = derive.is_regular(kind, p["auto"], (now or {}).get("g"), (now or {}).get("gs"), None)
-        p["lines"] = [f"{cur}: {derive.pitching_text(now)}", f"{prev}: {derive.pitching_text(before)}"]
+        p["headers"] = derive.PITCHING_HEADERS
+        p["seasons"] = [(cur, derive.pitching_cells(now)), (prev, derive.pitching_cells(before))]
     else:
         now, before = (derive.batting_line(raw["batting"].get(y, [])) for y in (cur, prev))
         games = {}
@@ -108,18 +114,27 @@ def to_view_player(raw: dict, override: dict) -> dict:
         p["position"] = override.get("position", p["auto"])
         p["sort"] = (now or {}).get("pa") or 0
         p["regular"] = derive.is_regular(kind, "", None, None, (now or {}).get("pa"))
-        p["lines"] = [f"{cur}: {derive.batting_text(now)}", f"{prev}: {derive.batting_text(before)}"]
+        p["headers"] = derive.BATTING_HEADERS
+        p["seasons"] = [(cur, derive.batting_cells(now)), (prev, derive.batting_cells(before))]
     return p
 
 
-def load_view_players(conn, code: str, overrides: dict) -> list[dict]:
-    return [to_view_player(raw, overrides.get(raw["player_id"], {})) for raw in npb_db.load_team(conn, code)]
+def load_view_players(conn, code: str, overrides: dict, leaving=frozenset()) -> list[dict]:
+    return [to_view_player(raw, overrides.get(raw["player_id"], {}), raw["player_id"] in leaving)
+            for raw in npb_db.load_team(conn, code)]
 
 
 def column_of(p):
+    if p["leaving"]:
+        return LEAVING
     if p["kind"] == "投手":
         return "先発" if p["role"] == "先発" else "救援"  # 中継ぎ / 抑え / 不明 -> 救援
     return p["position"]
+
+
+def column_hand(p):
+    """Throwing hand that splits the pitcher columns; the 退団予定 column is not split."""
+    return None if p["leaving"] else hand_of(p)
 
 
 def auto_column(p):
@@ -142,13 +157,20 @@ def label(p):
     return f"{html.escape(p['name'].split()[0])}#{html.escape(p['number'])}"
 
 
-def tooltip(p):
-    head = [f"#{p['number']}", p["birth"], f"{p['age']}歳" if p["age"] is not None else "", f"{p['throws']}投{p['bats']}打"]
-    if p["kind"] == "投手":
-        head.append(f"role={p['role']}")
-    else:
-        head.append(p["positions"])
-    return " / ".join(x for x in head + p["lines"] if x)
+def popup_html(p, moved_note=""):
+    """Contents of the hover popup (already escaped); drafts and careers are empty until npb_scraper's profile stage has run."""
+    e = html.escape
+    age = f"{p['age']}歳" if p["age"] is not None else ""
+    sub = " ・ ".join(x for x in (f"#{p['number']}", p["birth"], age, f"{p['throws']}投{p['bats']}打") if x)
+    kind = f"役割 {p['role']}" if p["kind"] == "投手" else f"守備 {p['positions'] or p['position']}"
+    facts = [("ドラフト", p["draft"]), ("経歴", p["career"])]
+    rows = "".join(f"<tr><th>{y}</th>" + (
+        "".join(f"<td>{e(str(c))}</td>" for c in cells) if cells else
+        f"<td colspan={len(p['headers'])} class=mute>1軍出場なし</td>") + "</tr>" for y, cells in p["seasons"])
+    return (f"<b>{e(p['name'])}</b> <span class=mute>{e(sub)}</span><br><span class=mute>{e(kind)}</span>"
+            + "".join(f"<br>{k}: {e(v)}" for k, v in facts if v)
+            + f"<table><tr><th></th>{''.join(f'<th>{h}</th>' for h in p['headers'])}</tr>{rows}</table>"
+            + (f"<br><span class=mute>{e(moved_note)}</span>" if moved_note else ""))
 
 
 def set_label(pid, on):
@@ -161,16 +183,30 @@ def set_label(pid, on):
     return True, "ok"
 
 
+def set_leaving(pid, on):
+    """Add / remove one player_id in leaving.json; return (ok, message)."""
+    if not pid:
+        return False, "no player_id"
+    leaving = set(load_json(LEAVING_PATH, []))
+    leaving.add(pid) if on else leaving.discard(pid)
+    save_json(LEAVING_PATH, sorted(leaving))
+    return True, "ok"
+
+
 def apply_move(code, pid, to):
-    """Store (or clear) the manual position / role of one player in overrides.json; return (ok, message)."""
+    """Move a player to a column: 退団予定 is stored in leaving.json, any other column as the manual
+    position / role in overrides.json (the player leaves 退団予定 first); return (ok, message)."""
     if code not in TEAMS:
         return False, "unknown team"
     with npb_db.connect() as conn:
         p = next((x for x in load_view_players(conn, code, {}) if x["player_id"] == pid), None)
     if p is None:
         return False, "unknown player"
+    if to == LEAVING:
+        return set_leaving(pid, True)
     if to not in (PIT_COLS if p["kind"] == "投手" else FLD_COLS):
         return False, f"{to} is not allowed for {p['kind']}"
+    set_leaving(pid, False)
     field = "role" if p["kind"] == "投手" else "position"
     if p["kind"] == "投手":
         # moving back to the auto column restores `auto`; otherwise 先発 or 中継ぎ
@@ -189,17 +225,17 @@ def apply_move(code, pid, to):
 def player_div(code, p, editable, labels=frozenset()):
     orig, now = auto_column(p), column_of(p)
     moved = orig != now
-    tip = tooltip(p) + (f" / 手動で移動: {orig} → {now}" if moved else "")
+    tip = popup_html(p, f"手動で移動: {orig} → {now}" if moved else "")
     cls = f"p {'hi' if p['regular'] else 'lo'}{' moved' if moved else ''}{' keep' if p['player_id'] in labels else ''}"
     drag = " draggable='true'" if editable else ""
     return (f"<div class='{cls}'{drag} data-id='{html.escape(p['player_id'])}' data-kind='{p['kind']}' data-throws='{hand_of(p) or ''}' "
-            f"title='{html.escape(tip, quote=True)}'>{label(p)}</div>")
+            f"data-tip='{html.escape(tip, quote=True)}'>{label(p)}</div>")
 
 
 def build_team(code, players, editable, labels=frozenset()):
     grid, counts = {}, {}
     for p in sorted(players, key=lambda p: -p["sort"]):
-        row, col = age_label(p["age"]), (column_of(p), hand_of(p))
+        row, col = age_label(p["age"]), (column_of(p), column_hand(p))
         grid.setdefault(row, {}).setdefault(col, []).append(p)
         counts[col] = counts.get(col, 0) + 1
     rows = AGE_ROWS + (["年齢不明"] if "年齢不明" in grid else [])
@@ -239,16 +275,25 @@ thead th{background:var(--head);position:sticky;top:0}tbody th{background:var(--
 th .n{color:var(--mute);font-weight:400;margin-left:4px;font-size:12px}
 tr.empty th{color:var(--mute);font-weight:400}.tot{text-align:center;color:var(--mute)}
 .p{cursor:default}.p[draggable=true]{cursor:grab}td.ok{background:var(--accbg)}.p.dragging{opacity:.4}#msg{color:var(--acc);font-size:12px}.p.hi{color:var(--fg);font-weight:600}.p.lo{color:var(--mute)}.p.keep{color:var(--keep);font-weight:600}.p[draggable=true]:hover{text-decoration:underline}
+#tip{position:fixed;display:none;z-index:10;max-width:420px;padding:8px 10px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px;pointer-events:none;white-space:normal}
+#tip .mute,#tip td.mute{color:var(--mute)}#tip table{margin-top:6px;min-width:0}#tip th,#tip td{padding:1px 6px;text-align:right;font-weight:400}#tip th{background:none;position:static}
 </style></head><body>
 <header><h1>NPB 2026 現状戦力</h1>
-<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルで 2026・2025 の成績／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
+<p class=note>行 = 2027年開幕時の年齢（仮: 3/26時点）／ 名字#背番号／ 明るい文字 = 先発GS≥__GS__ ・ 救援G≥__G__ ・ 野手PA≥__PA__（それ以外は暗い）／ カーソルでポップアップ（ドラフト・経歴・2026/2025の成績）／ 緑 = まだ数年使えそう（名前クリックで付け外し）／ 退団者（自由契約・引退）と育成選手は除く ／ 生成日 __DATE__<br>__EDITNOTE__</p><p id=msg></p></header>
 <nav id=tabs></nav>
+<div id=tip></div>
 __SECTIONS__
 <script>
 const names=__NAMES__;const tabs=document.getElementById('tabs');const secs=[...document.querySelectorAll('section')];
 function show(i){secs.forEach((s,j)=>s.classList.toggle('on',i===j));[...tabs.children].forEach((b,j)=>b.setAttribute('aria-selected',i===j));history.replaceState(null,'','#'+i)}
 names.forEach((n,i)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>show(i);tabs.appendChild(b)});
 show(Math.min(parseInt(location.hash.slice(1))||0,names.length-1));
+const tip=document.getElementById('tip');
+document.addEventListener('mouseover',e=>{const d=e.target.closest('.p');if(!d){tip.style.display='none';return}
+  tip.innerHTML=d.dataset.tip;tip.style.display='block';const r=d.getBoundingClientRect();
+  tip.style.left=Math.max(4,Math.min(r.left,innerWidth-tip.offsetWidth-4))+'px';
+  tip.style.top=(r.bottom+tip.offsetHeight+8>innerHeight?Math.max(4,r.top-tip.offsetHeight-4):r.bottom+4)+'px'});
+document.addEventListener('dragstart',()=>{tip.style.display='none'});
 const EDIT=__EDIT__;
 if(EDIT){
   const PIT=['先発','救援'],FLD=['捕手','一塁手','二塁手','三塁手','遊撃手','外野手'];
@@ -256,7 +301,7 @@ if(EDIT){
   document.addEventListener('click',async e=>{const d=e.target.closest('.p');if(!d)return;const on=!d.classList.contains('keep');
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:d.dataset.id,on})});
     const j=await r.json();if(j.ok){d.classList.toggle('keep',on)}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
-  const ok=(td)=>drag&&td.dataset.col&&(drag.kind==='投手'?PIT:FLD).includes(td.dataset.col)&&td.parentElement===drag.tr&&td.dataset.throws===drag.throws;
+  const ok=(td)=>drag&&td.parentElement===drag.tr&&(td.dataset.col==='退団予定'||(drag.kind==='投手'?PIT:FLD).includes(td.dataset.col)&&td.dataset.throws===drag.throws);
   document.addEventListener('dragstart',e=>{const d=e.target.closest('.p');if(!d)return;drag={id:d.dataset.id,kind:d.dataset.kind,throws:d.dataset.throws,tr:d.closest('tr'),code:d.closest('table').dataset.code,el:d};d.classList.add('dragging');e.dataTransfer.setData('text/plain',d.dataset.id)});
   document.addEventListener('dragend',()=>{if(drag)drag.el.classList.remove('dragging');drag=null;document.querySelectorAll('td.ok').forEach(t=>t.classList.remove('ok'))});
   document.addEventListener('dragover',e=>{const td=e.target.closest('td');if(td&&ok(td)){e.preventDefault();td.classList.add('ok')}});
@@ -273,13 +318,14 @@ def build_page(editable=False):
     names, sections = [], []
     labels = set(load_json(LABELS_PATH, []))
     overrides = load_json(OVERRIDES_PATH, {})
+    leaving = set(load_json(LEAVING_PATH, []))
     with npb_db.connect() as conn:
         for code in TEAM_ORDER:
-            players = load_view_players(conn, code, overrides)
+            players = load_view_players(conn, code, overrides, leaving)
             names.append(TEAMS[code])
             sections.append(f"<section>{build_team(code, players, editable, labels)}</section>")
     note = ("ドラッグで列を移動できます（同じ年齢の行の中だけ。投手=先発↔中継ぎ・抑え（右・左は固定）、野手=守備位置どうし）。"
-            "保存先: overrides.json（position / role）" if editable else
+            "退団予定の列へも動かせます（保存先: leaving.json）。保存先: overrides.json（position / role）" if editable else
             "編集は <code>python3 src/build_view.py --serve</code>")
     return (PAGE.replace("__SECTIONS__", "\n".join(sections))
             .replace("__NAMES__", json.dumps(names, ensure_ascii=False))
