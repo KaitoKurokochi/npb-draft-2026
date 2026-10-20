@@ -36,3 +36,8 @@ def test_set_need_levels_per_team_and_rejects_unknowns(tmp_path, monkeypatch):
     assert build_view.set_need("zz", "捕手", "now")[0] is False
     assert build_view.set_need("g", "投手", "now")[0] is False
     assert build_view.set_need("g", "捕手", "soon")[0] is False
+
+
+def test_page_script_calls_every_api_endpoint():
+    for endpoint in ("/api/label", "/api/move", "/api/need"):
+        assert f"fetch('{endpoint}'" in build_view.PAGE

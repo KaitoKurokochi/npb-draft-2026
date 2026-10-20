@@ -330,6 +330,9 @@ if(EDIT){
     const r=await fetch('/api/need',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:t.dataset.code,column:th.dataset.label,level:next})});
     const j=await r.json();if(j.ok){[th,...[...t.querySelectorAll('tbody tr')].map(tr=>tr.cells[i])].forEach(c=>{c.classList.remove('need-future','need-now');if(next)c.classList.add('need-'+next)})}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
   let drag=null;
+  document.addEventListener('click',async e=>{const d=e.target.closest('.p');if(!d)return;const on=!d.classList.contains('keep');
+    const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:d.dataset.id,on})});
+    const j=await r.json();if(j.ok){d.classList.toggle('keep',on)}else{document.getElementById('msg').textContent='保存できませんでした: '+j.message}});
   const ok=(td)=>drag&&td.parentElement===drag.tr&&(td.dataset.col==='退団予定'||(drag.kind==='投手'?PIT:FLD).includes(td.dataset.col)&&td.dataset.throws===drag.throws);
   document.addEventListener('dragstart',e=>{const d=e.target.closest('.p');if(!d)return;drag={id:d.dataset.id,kind:d.dataset.kind,throws:d.dataset.throws,tr:d.closest('tr'),code:d.closest('table').dataset.code,el:d};d.classList.add('dragging');e.dataTransfer.setData('text/plain',d.dataset.id)});
   document.addEventListener('dragend',()=>{if(drag)drag.el.classList.remove('dragging');drag=null;document.querySelectorAll('td.ok').forEach(t=>t.classList.remove('ok'))});
